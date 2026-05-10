@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
   Flame, TrendingUp, Search, Zap, Brain, Video,
@@ -672,6 +672,31 @@ function AppShowcase() {
 // ─── PAGE ──────────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const src = "https://stream.mux.com/BuGGTsiXq1T00WUb8qfURrHkTCbhrkfFLSv4uAOZzdhw.m3u8";
+    let hlsInstance: import("hls.js").default | null = null;
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = src;
+      video.play().catch(() => {});
+    } else {
+      import("hls.js").then(({ default: Hls }) => {
+        if (!Hls.isSupported()) return;
+        hlsInstance = new Hls({ autoStartLoad: true, startLevel: -1 });
+        hlsInstance.loadSource(src);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+        });
+      });
+    }
+    return () => { hlsInstance?.destroy(); };
+  }, []);
+
   return (
     <div className="min-h-screen overflow-x-hidden" style={{ background: "#08060f", color: "#fff" }}>
 
@@ -723,17 +748,32 @@ export default function LandingPage() {
 
       {/* ── HERO ── */}
       <section className="relative pt-12 pb-20 px-4 overflow-hidden">
-        {/* Glow orbs */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-0 left-1/3 w-[700px] h-[500px] rounded-full blur-3xl opacity-25"
+        {/* Video de fondo */}
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          loop
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ zIndex: 0 }}
+        />
+        {/* Overlay oscuro con gradiente para mantener legibilidad */}
+        <div className="absolute inset-0 pointer-events-none" style={{
+          background: "linear-gradient(to bottom, rgba(8,6,15,0.72) 0%, rgba(8,6,15,0.60) 50%, rgba(8,6,15,0.85) 100%)",
+          zIndex: 1
+        }} />
+        {/* Glow orbs encima del video */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 2 }}>
+          <div className="absolute top-0 left-1/3 w-[700px] h-[500px] rounded-full blur-3xl opacity-20"
             style={{ background: "radial-gradient(ellipse, #7c3aed 0%, #db2777 50%, transparent 70%)" }} />
-          <div className="absolute top-40 right-10 w-72 h-72 rounded-full blur-3xl opacity-15"
+          <div className="absolute top-40 right-10 w-72 h-72 rounded-full blur-3xl opacity-10"
             style={{ background: "#f97316" }} />
-          <div className="absolute bottom-0 left-10 w-64 h-64 rounded-full blur-3xl opacity-10"
+          <div className="absolute bottom-0 left-10 w-64 h-64 rounded-full blur-3xl opacity-8"
             style={{ background: "#8b5cf6" }} />
         </div>
 
-        <div className="relative max-w-6xl mx-auto">
+        <div className="relative max-w-6xl mx-auto" style={{ zIndex: 3 }}>
           <div className="grid lg:grid-cols-2 gap-12 items-center">
 
             {/* ── LEFT: Text ── */}
