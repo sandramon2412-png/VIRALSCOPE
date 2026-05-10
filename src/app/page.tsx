@@ -186,17 +186,29 @@ export default function Home() {
     const video = videoRef.current;
     if (!video) return;
     const src = "https://stream.mux.com/BuGGTsiXq1T00WUb8qfURrHkTCbhrkfFLSv4uAOZzdhw.m3u8";
+
+    let hlsInstance: import("hls.js").default | null = null;
+
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari — soporta HLS nativo
       video.src = src;
+      video.play().catch(() => {});
     } else {
+      // Chrome, Firefox, Edge — usar HLS.js
       import("hls.js").then(({ default: Hls }) => {
-        if (Hls.isSupported()) {
-          const hls = new Hls({ autoStartLoad: true });
-          hls.loadSource(src);
-          hls.attachMedia(video);
-        }
+        if (!Hls.isSupported()) return;
+        hlsInstance = new Hls({ autoStartLoad: true, startLevel: -1 });
+        hlsInstance.loadSource(src);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+        });
       });
     }
+
+    return () => {
+      hlsInstance?.destroy();
+    };
   }, []);
 
   // Paginate results
