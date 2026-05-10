@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -180,37 +180,6 @@ export default function Home() {
     router.push(`/crear-canal?${params.toString()}`);
   }
 
-  // Video background
-  const videoRef = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const src = "https://stream.mux.com/BuGGTsiXq1T00WUb8qfURrHkTCbhrkfFLSv4uAOZzdhw.m3u8";
-
-    let hlsInstance: import("hls.js").default | null = null;
-
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari — soporta HLS nativo
-      video.src = src;
-      video.play().catch(() => {});
-    } else {
-      // Chrome, Firefox, Edge — usar HLS.js
-      import("hls.js").then(({ default: Hls }) => {
-        if (!Hls.isSupported()) return;
-        hlsInstance = new Hls({ autoStartLoad: true, startLevel: -1 });
-        hlsInstance.loadSource(src);
-        hlsInstance.attachMedia(video);
-        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().catch(() => {});
-        });
-      });
-    }
-
-    return () => {
-      hlsInstance?.destroy();
-    };
-  }, []);
-
   // Paginate results
   const totalPages = results ? Math.ceil(results.videos.length / RESULTS_PER_PAGE) : 0;
   const paginatedVideos = results
@@ -245,46 +214,30 @@ export default function Home() {
       <GlobalNav />
       <WelcomeBanner />
 
-      {/* ── Hero con video de fondo ── */}
-      <section className="relative overflow-hidden flex items-center justify-center min-h-[440px] md:min-h-[520px]">
-        {/* Video */}
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-        {/* Overlay oscuro para legibilidad */}
-        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(10,8,18,0.55) 0%, rgba(10,8,18,0.75) 70%, #0a0812 100%)" }} />
-        {/* Contenido */}
-        <div className="relative z-10 text-center max-w-4xl mx-auto px-4 py-16 md:py-24 space-y-5">
+      <main className="max-w-7xl mx-auto px-4 py-6 md:py-10">
+        {/* Hero */}
+        <div className="text-center mb-10 space-y-4">
           <div className="inline-flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-full"
             style={{
-              background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))",
-              border: "1px solid rgba(139,92,246,0.4)",
-              backdropFilter: "blur(8px)"
+              background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(236,72,153,0.15))",
+              border: "1px solid rgba(139,92,246,0.3)"
             }}>
             <Sparkles className="w-3.5 h-3.5" style={{ color: "#a78bfa" }} />
             <span style={{ background: "linear-gradient(135deg, #a78bfa, #f472b6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               Outlier Score · 9 herramientas con IA · 100% en español
             </span>
           </div>
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight drop-shadow-xl">
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight">
             La suite definitiva para{" "}
             <br className="hidden sm:block" />
             <span style={{ background: "linear-gradient(135deg, #8b5cf6, #ec4899, #f97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               dominar YouTube
             </span>
           </h1>
-          <p className="text-white/60 max-w-xl mx-auto text-base drop-shadow">
+          <p className="text-white/45 max-w-xl mx-auto text-base">
             Encuentra videos virales, genera títulos irresistibles, crea hooks que retienen y analiza a tu competencia. Todo con IA.
           </p>
         </div>
-      </section>
-
-      <main className="max-w-7xl mx-auto px-4 py-6 md:py-10">
 
         {/* Search bar with gradient glow border */}
         <div className="max-w-2xl mx-auto mb-4">

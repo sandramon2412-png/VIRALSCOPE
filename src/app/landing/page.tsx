@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   Flame, TrendingUp, Search, Zap, Brain, Video,
@@ -672,30 +672,6 @@ function AppShowcase() {
 // ─── PAGE ──────────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const src = "https://stream.mux.com/BuGGTsiXq1T00WUb8qfURrHkTCbhrkfFLSv4uAOZzdhw.m3u8";
-    let hlsInstance: import("hls.js").default | null = null;
-
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = src;
-      video.play().catch(() => {});
-    } else {
-      import("hls.js").then(({ default: Hls }) => {
-        if (!Hls.isSupported()) return;
-        hlsInstance = new Hls({ autoStartLoad: true, startLevel: -1 });
-        hlsInstance.loadSource(src);
-        hlsInstance.attachMedia(video);
-        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().catch(() => {});
-        });
-      });
-    }
-    return () => { hlsInstance?.destroy(); };
-  }, []);
 
   return (
     <div className="min-h-screen overflow-x-hidden" style={{ background: "#08060f", color: "#fff" }}>
@@ -750,14 +726,15 @@ export default function LandingPage() {
       <section className="relative pt-12 pb-20 px-4 overflow-hidden">
         {/* Video de fondo */}
         <video
-          ref={videoRef}
           autoPlay
           muted
           loop
           playsInline
           className="absolute inset-0 w-full h-full object-cover"
           style={{ zIndex: 0 }}
-        />
+        >
+          <source src="/hero-bg.mp4" type="video/mp4" />
+        </video>
         {/* Overlay oscuro con gradiente para mantener legibilidad */}
         <div className="absolute inset-0 pointer-events-none" style={{
           background: "linear-gradient(to bottom, rgba(8,6,15,0.72) 0%, rgba(8,6,15,0.60) 50%, rgba(8,6,15,0.85) 100%)",
