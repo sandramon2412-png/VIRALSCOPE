@@ -408,6 +408,38 @@ useEffect(() => {
 
 ---
 
+## GPU Local — Face Swap con ComfyUI + ReActor
+
+La página `/miniatura` tiene una funcionalidad de **Face Swap** que usa la GPU NVIDIA local.
+
+### Cómo funciona
+- La app llama a `/api/faceswap/route.ts`
+- Ese route se conecta a **ComfyUI corriendo localmente en `http://localhost:8188`**
+- ComfyUI usa el nodo **ReActor** para hacer el swap de cara en la miniatura
+- **Requiere GPU NVIDIA** para funcionar correctamente (CUDA)
+
+### Setup requerido (en la máquina local)
+1. Tener **ComfyUI** instalado y corriendo: `http://localhost:8188`
+2. Tener el nodo **ReActor** instalado en ComfyUI
+3. GPU NVIDIA con drivers CUDA actualizados
+4. La app Next.js también corriendo en `localhost:3000`
+
+### Cambiar la URL de ComfyUI
+En `src/app/api/faceswap/route.ts`, línea 5:
+```ts
+const COMFYUI_URL = "http://localhost:8188"; // ← cambiar si es otro puerto o IP
+```
+
+### Flujo técnico
+1. Usuario sube foto de su cara + miniatura generada
+2. Se suben ambas imágenes a ComfyUI via API
+3. Se ejecuta el workflow de ReActor
+4. ComfyUI devuelve la miniatura con la cara aplicada
+
+> ⚠️ Esta funcionalidad **solo funciona en desarrollo local** (no en Vercel), ya que requiere ComfyUI corriendo en la misma máquina.
+
+---
+
 ## Comandos
 
 ```bash
