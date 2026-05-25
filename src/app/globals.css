@@ -75,6 +75,34 @@ body {
 .score-glow { animation: score-glow 2s ease-in-out infinite; }
 .fade-up { animation: fade-up 0.6s ease-out forwards; }
 
+/* Hero animated background */
+@keyframes hero-orb-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.18; }
+  33%       { transform: translate(60px, -40px) scale(1.15); opacity: 0.28; }
+  66%       { transform: translate(-30px, 30px) scale(0.9); opacity: 0.14; }
+}
+@keyframes hero-orb-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.12; }
+  40%       { transform: translate(-50px, 25px) scale(1.2); opacity: 0.22; }
+  80%       { transform: translate(40px, -20px) scale(0.85); opacity: 0.10; }
+}
+@keyframes hero-orb-3 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.08; }
+  50%       { transform: translate(20px, -50px) scale(1.1); opacity: 0.16; }
+}
+@keyframes hero-shimmer {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.hero-orb-1 { animation: hero-orb-1 14s ease-in-out infinite; }
+.hero-orb-2 { animation: hero-orb-2 18s ease-in-out infinite; }
+.hero-orb-3 { animation: hero-orb-3 11s ease-in-out infinite; }
+.hero-shimmer {
+  background-size: 300% 300%;
+  animation: hero-shimmer 20s ease infinite;
+}
+
 /* Gradient text utility */
 .grad-text {
   background: linear-gradient(135deg, #8b5cf6, #ec4899, #f97316);

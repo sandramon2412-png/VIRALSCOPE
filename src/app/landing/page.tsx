@@ -724,31 +724,56 @@ export default function LandingPage() {
 
       {/* ── HERO ── */}
       <section className="relative pt-12 pb-20 px-4 overflow-hidden">
-        {/* Video de fondo */}
-        <video
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ zIndex: 0 }}
-        >
-          <source src="/hero-bg.mp4" type="video/mp4" />
-        </video>
-        {/* Overlay oscuro con gradiente para mantener legibilidad */}
-        <div className="absolute inset-0 pointer-events-none" style={{
-          background: "linear-gradient(to bottom, rgba(8,6,15,0.72) 0%, rgba(8,6,15,0.60) 50%, rgba(8,6,15,0.85) 100%)",
-          zIndex: 1
-        }} />
-        {/* Glow orbs encima del video */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 2 }}>
-          <div className="absolute top-0 left-1/3 w-[700px] h-[500px] rounded-full blur-3xl opacity-20"
-            style={{ background: "radial-gradient(ellipse, #7c3aed 0%, #db2777 50%, transparent 70%)" }} />
-          <div className="absolute top-40 right-10 w-72 h-72 rounded-full blur-3xl opacity-10"
-            style={{ background: "#f97316" }} />
-          <div className="absolute bottom-0 left-10 w-64 h-64 rounded-full blur-3xl opacity-8"
-            style={{ background: "#8b5cf6" }} />
+        {/* Fondo animado CSS — funciona en producción sin depender de archivos externos */}
+        <div
+          className="absolute inset-0 hero-shimmer"
+          style={{
+            zIndex: 0,
+            background: "linear-gradient(135deg, #08060f 0%, #0d0820 25%, #0a0612 50%, #0c0818 75%, #08060f 100%)",
+          }}
+        />
+        {/* Orbs animados */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 1 }}>
+          <div
+            className="hero-orb-1 absolute rounded-full blur-3xl"
+            style={{
+              top: "-80px", left: "25%",
+              width: "700px", height: "500px",
+              background: "radial-gradient(ellipse, rgba(124,58,237,0.55) 0%, rgba(219,39,119,0.35) 50%, transparent 70%)",
+            }}
+          />
+          <div
+            className="hero-orb-2 absolute rounded-full blur-3xl"
+            style={{
+              top: "120px", right: "-60px",
+              width: "420px", height: "420px",
+              background: "radial-gradient(ellipse, rgba(249,115,22,0.35) 0%, rgba(239,68,68,0.2) 60%, transparent 80%)",
+            }}
+          />
+          <div
+            className="hero-orb-3 absolute rounded-full blur-3xl"
+            style={{
+              bottom: "0", left: "0",
+              width: "360px", height: "360px",
+              background: "radial-gradient(ellipse, rgba(139,92,246,0.3) 0%, transparent 70%)",
+            }}
+          />
+          {/* Ruido de estrellas sutiles */}
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage: "radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.08) 0%, transparent 100%), radial-gradient(1px 1px at 70% 20%, rgba(255,255,255,0.06) 0%, transparent 100%), radial-gradient(1px 1px at 50% 70%, rgba(255,255,255,0.05) 0%, transparent 100%), radial-gradient(1px 1px at 85% 60%, rgba(255,255,255,0.07) 0%, transparent 100%)",
+            }}
+          />
         </div>
+        {/* Overlay de degradado vertical para mantener legibilidad del texto */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: "linear-gradient(to bottom, rgba(8,6,15,0.3) 0%, rgba(8,6,15,0.1) 40%, rgba(8,6,15,0.5) 100%)",
+            zIndex: 2,
+          }}
+        />
 
         <div className="relative max-w-6xl mx-auto" style={{ zIndex: 3 }}>
           <div className="grid lg:grid-cols-2 gap-12 items-center">
