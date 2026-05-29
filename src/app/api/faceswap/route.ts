@@ -2,132 +2,83 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const maxDuration = 120;
 
-const COMFYUI_URL = "http://localhost:8188";
+const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
+const REPLICATE_MODEL   = "cdingram/face-swap";
 
-// Upload a base64 image to ComfyUI and return the filename
-async function uploadImage(base64Data: string, filename: string): Promise<string> {
-  // Remove data:image/...;base64, prefix if present
-  const clean = base64Data.replace(/^data:image\/[^;]+;base64,/, "");
-  const buffer = Buffer.from(clean, "base64");
-
-  // Create form data
-  const formData = new FormData();
-  const blob = new Blob([buffer], { type: "image/png" });
-  formData.append("image", blob, filename);
-  formData.append("overwrite", "true");
-
-  const res = await fetch(`${COMFYUI_URL}/upload/image`, {
+async function createPrediction(targetBase64: string, faceBase64: string): Promise<string> {
+  const res = await fetch(`https://api.replicate.com/v1/models/${REPLICATE_MODEL}/predictions`, {
     method: "POST",
-    body: formData,
+    headers: {
+      "Authorization": `Bearer ${REPLICATE_API_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "wait=60",
+    },
+    body: JSON.stringify({
+      input: {
+        base_image: targetBase64,
+        swap_image: faceBase64,
+      },
+    }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Upload failed: ${res.status} - ${text}`);
+    throw new Error(`Replicate error: ${res.status} — ${text}`);
   }
 
   const data = await res.json();
-  return data.name; // filename stored in ComfyUI input folder
-}
 
-// ReActor face swap workflow using LoadImage nodes
-function buildReactorWorkflow(inputImageName: string, faceImageName: string) {
-  return {
-    "1": {
-      class_type: "LoadImage",
-      inputs: { image: inputImageName },
-    },
-    "2": {
-      class_type: "LoadImage",
-      inputs: { image: faceImageName },
-    },
-    "3": {
-      class_type: "ReActorFaceSwap",
-      inputs: {
-        enabled: true,
-        input_image: ["1", 0],
-        source_image: ["2", 0],
-        swap_model: "inswapper_128.onnx",
-        facedetection: "retinaface_resnet50",
-        face_restore_model: "GFPGANv1.3.pth",
-        face_restore_visibility: 1,
-        codeformer_weight: 0.5,
-        detect_gender_input: "no",
-        detect_gender_source: "no",
-        input_faces_index: "0",
-        source_faces_index: "0",
-        console_log_level: 1,
-      },
-    },
-    "4": {
-      class_type: "SaveImage",
-      inputs: {
-        images: ["3", 0],
-        filename_prefix: "faceswap_viralscope",
-      },
-    },
-  };
-}
-
-async function queuePrompt(workflow: object): Promise<string> {
-  const res = await fetch(`${COMFYUI_URL}/prompt`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: workflow }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`ComfyUI prompt error: ${res.status} - ${text}`);
+  // "Prefer: wait" devuelve el resultado directo si termina en <60s
+  if (data.status === "succeeded" && data.output) {
+    return data.output;
   }
-  const data = await res.json();
-  return data.prompt_id;
+
+  // Si no terminó, hacemos polling
+  if (data.id) {
+    return await pollPrediction(data.id);
+  }
+
+  throw new Error("Respuesta inesperada de Replicate");
 }
 
-async function waitForResult(promptId: string, timeoutMs = 90000): Promise<string> {
+async function pollPrediction(predictionId: string, timeoutMs = 90000): Promise<string> {
   const start = Date.now();
+
   while (Date.now() - start < timeoutMs) {
-    await new Promise(r => setTimeout(r, 2000));
-    const res = await fetch(`${COMFYUI_URL}/history/${promptId}`);
+    await new Promise(r => setTimeout(r, 2500));
+
+    const res = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+      headers: { "Authorization": `Bearer ${REPLICATE_API_KEY}` },
+    });
+
     if (!res.ok) continue;
-    const history = await res.json();
-    if (history[promptId]) {
-      const outputs = history[promptId].outputs;
-      for (const nodeId of Object.keys(outputs)) {
-        if (outputs[nodeId].images?.length > 0) {
-          return outputs[nodeId].images[0].filename;
-        }
-      }
-      // Check if there was an error
-      if (history[promptId].status?.status_str === "error") {
-        throw new Error("ComfyUI processing error - revisa la consola de ComfyUI");
-      }
-    }
+
+    const data = await res.json();
+
+    if (data.status === "succeeded" && data.output) return data.output;
+    if (data.status === "failed") throw new Error(data.error ?? "Replicate: procesamiento fallido");
   }
-  throw new Error("Timeout esperando resultado de ComfyUI (90s)");
+
+  throw new Error("Timeout esperando resultado de Replicate (90s)");
 }
 
-async function getImageAsBase64(filename: string): Promise<string> {
-  const res = await fetch(
-    `${COMFYUI_URL}/view?filename=${encodeURIComponent(filename)}&type=output`
-  );
-  if (!res.ok) throw new Error("No se pudo obtener la imagen de ComfyUI");
+async function urlToBase64(url: string): Promise<string> {
+  const res = await fetch(url);
   const buffer = await res.arrayBuffer();
   const base64 = Buffer.from(buffer).toString("base64");
-  return `data:image/png;base64,${base64}`;
+  const mime = res.headers.get("content-type") ?? "image/png";
+  return `data:${mime};base64,${base64}`;
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    // Check ComfyUI is running
-    try {
-      const check = await fetch(`${COMFYUI_URL}/system_stats`, { signal: AbortSignal.timeout(3000) });
-      if (!check.ok) throw new Error();
-    } catch {
-      return NextResponse.json({
-        error: "ComfyUI no está corriendo. Ábrelo en tu PC primero."
-      }, { status: 503 });
-    }
+  if (!REPLICATE_API_KEY) {
+    return NextResponse.json(
+      { error: "REPLICATE_API_KEY no configurada en variables de entorno" },
+      { status: 503 }
+    );
+  }
 
+  try {
     const body = await req.json();
     const { thumbnailBase64, faceBase64 } = body;
 
@@ -135,20 +86,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Faltan imágenes" }, { status: 400 });
     }
 
-    // Upload both images to ComfyUI
-    const [thumbName, faceName] = await Promise.all([
-      uploadImage(thumbnailBase64, "faceswap_input.png"),
-      uploadImage(faceBase64, "faceswap_face.png"),
-    ]);
+    // Replicate acepta base64 directamente como data URI
+    const outputUrl = await createPrediction(thumbnailBase64, faceBase64);
 
-    // Build and queue ReActor workflow
-    const workflow = buildReactorWorkflow(thumbName, faceName);
-    const promptId = await queuePrompt(workflow);
+    // Convertimos la URL de salida a base64 para devolverla al cliente
+    const resultBase64 = await urlToBase64(outputUrl);
 
-    const filename  = await waitForResult(promptId);
-    const resultB64 = await getImageAsBase64(filename);
-
-    return NextResponse.json({ imageBase64: resultB64, method: "reactor" });
+    return NextResponse.json({ imageBase64: resultBase64, method: "replicate" });
 
   } catch (err: unknown) {
     console.error("[faceswap] error:", err);
