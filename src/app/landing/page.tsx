@@ -748,7 +748,9 @@ export default function LandingPage() {
       </header>
 
       {/* ── HERO ── */}
-      <section className="relative pt-12 pb-20 px-4 overflow-hidden">
+      <section className="relative pt-12 pb-20 px-4 overflow-hidden" style={{
+        background: "linear-gradient(135deg, #0d0820 0%, #08060f 40%, #0c0818 100%)"
+      }}>
         {/* Video de fondo HLS (Mux) */}
         <video
           ref={videoRef}
