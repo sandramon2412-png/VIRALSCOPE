@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Search, TrendingUp, Loader2, AlertCircle, Flame, Bookmark, Check,
   Zap, Mic, BarChart2, Image, Calculator,
@@ -133,6 +134,14 @@ type TipoId  = typeof TIPO_OPTIONS[number]["id"];
 
 export default function Home() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace("/landing");
+    }
+  }, [user, authLoading, router]);
+
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -146,6 +155,14 @@ export default function Home() {
   const [selectedEntry, setSelectedEntry] = useState<EntryId | null>(null);
   const [selectedTipo, setSelectedTipo] = useState<TipoId | null>(null);
   const [selectedNicho, setSelectedNicho] = useState<string | null>(null);
+
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-[#0a0812] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   function openOnboarding() {
     setStep(1);
