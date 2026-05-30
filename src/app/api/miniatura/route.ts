@@ -52,10 +52,10 @@ const TEXTO_ESPACIO_MAP: Record<string, string> = {
   ninguno:   "",
 };
 
-const FORMATO_SIZE: Record<string, "1792x1024" | "1024x1024" | "1024x1792"> = {
-  landscape: "1792x1024",
+const FORMATO_SIZE: Record<string, "1536x1024" | "1024x1024" | "1024x1536"> = {
+  landscape: "1536x1024",
   square:    "1024x1024",
-  portrait:  "1024x1792",
+  portrait:  "1024x1536",
 };
 
 function getNichoVisual(nicho: string): string {
@@ -328,19 +328,22 @@ export async function POST(req: NextRequest) {
     // Generar N imágenes con DALL-E 3 en paralelo
     const imagePromises = prompts.map(promptText =>
       openai.images.generate({
-        model:   "dall-e-3",
+        model:   "gpt-image-1",
         prompt:  promptText,
         n:       1,
         size:    dalleSize,
-        quality: "standard",
+        quality: "medium",
       })
     );
     const imageResponses = await Promise.all(imagePromises);
 
-    const images = imageResponses.map((r, i) => ({
-      url:    r.data?.[0]?.url || "",
-      prompt: prompts[i],
-    })).filter(img => img.url);
+    const images = imageResponses.map((r, i) => {
+      const item = r.data?.[0];
+      const url = item?.b64_json
+        ? `data:image/png;base64,${item.b64_json}`
+        : (item?.url || "");
+      return { url, prompt: prompts[i] };
+    }).filter(img => img.url);
 
     if (images.length === 0) {
       return NextResponse.json({ error: "DALL-E 3 no devolvió imágenes" }, { status: 500 });

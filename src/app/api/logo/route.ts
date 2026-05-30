@@ -79,14 +79,16 @@ Responde SOLO con JSON (sin markdown ni backticks):
   if (tipo === "logo" || tipo === "ambos") {
     try {
       const logoRes = await openai.images.generate({
-        model: "dall-e-3",
+        model: "gpt-image-1",
         prompt: prompts.logo_prompt,
         n: 1,
         size: "1024x1024",
-        quality: "standard",
-        style: "vivid",
+        quality: "medium",
       });
-      results.logo = logoRes.data?.[0]?.url;
+      const logoItem = logoRes.data?.[0];
+      results.logo = logoItem?.b64_json
+        ? `data:image/png;base64,${logoItem.b64_json}`
+        : logoItem?.url;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error generando logo";
       return NextResponse.json({ error: `Logo: ${msg}` }, { status: 500 });
@@ -96,14 +98,16 @@ Responde SOLO con JSON (sin markdown ni backticks):
   if (tipo === "banner" || tipo === "ambos") {
     try {
       const bannerRes = await openai.images.generate({
-        model: "dall-e-3",
+        model: "gpt-image-1",
         prompt: prompts.banner_prompt,
         n: 1,
-        size: "1792x1024",
-        quality: "standard",
-        style: "vivid",
+        size: "1536x1024",
+        quality: "medium",
       });
-      results.banner = bannerRes.data?.[0]?.url;
+      const bannerItem = bannerRes.data?.[0];
+      results.banner = bannerItem?.b64_json
+        ? `data:image/png;base64,${bannerItem.b64_json}`
+        : bannerItem?.url;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error generando banner";
       return NextResponse.json({ error: `Banner: ${msg}` }, { status: 500 });
