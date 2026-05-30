@@ -333,7 +333,6 @@ export async function POST(req: NextRequest) {
         n:       1,
         size:    dalleSize,
         quality: "standard",
-        style:   "vivid",
       })
     );
     const imageResponses = await Promise.all(imagePromises);

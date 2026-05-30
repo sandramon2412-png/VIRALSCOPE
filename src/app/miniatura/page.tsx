@@ -7,6 +7,8 @@ import {
   X, Copy, Check, ChevronDown, ChevronUp, Edit3,
   Camera, User as UserIcon, ScanEye, Upload, TrendingUp,
   ShieldCheck, AlertTriangle, Lightbulb,
+  Flame, Target, EyeOff, DollarSign, Rocket, Gamepad2, Moon,
+  Tv, Square, Smartphone, ArrowLeft, ArrowRight, ArrowDown, Minus,
 } from "lucide-react";
 import type { AnalisisMiniatura } from "@/app/api/miniatura/analizar/route";
 import GlobalNav from "@/components/GlobalNav";
@@ -14,14 +16,14 @@ import GlobalNav from "@/components/GlobalNav";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ESTILOS = [
-  { id: "impactante",  label: "🔥 Impactante",   desc: "Alto contraste, dramático" },
-  { id: "mrbeast",     label: "🎯 MrBeast",       desc: "Over-saturado, viral" },
-  { id: "faceless",    label: "🎭 Faceless",       desc: "Sin caras, conceptual" },
-  { id: "finanzas",    label: "💰 Finanzas",       desc: "Oro, dinero, premium" },
-  { id: "motivacion",  label: "🚀 Motivación",     desc: "Épico, silueta, cielo" },
-  { id: "gaming",      label: "🎮 Gaming",         desc: "Neon, acción, explosivo" },
-  { id: "minimalista", label: "✨ Minimalista",    desc: "Limpio, elegante" },
-  { id: "oscuro",      label: "🌑 Oscuro",         desc: "Dark, neon, noir" },
+  { id: "impactante",  icon: Flame,       label: "Impactante",  desc: "Alto contraste, dramático" },
+  { id: "mrbeast",     icon: Target,      label: "MrBeast",     desc: "Over-saturado, viral" },
+  { id: "faceless",    icon: EyeOff,      label: "Faceless",    desc: "Sin caras, conceptual" },
+  { id: "finanzas",    icon: DollarSign,  label: "Finanzas",    desc: "Oro, dinero, premium" },
+  { id: "motivacion",  icon: Rocket,      label: "Motivación",  desc: "Épico, silueta, cielo" },
+  { id: "gaming",      icon: Gamepad2,    label: "Gaming",      desc: "Neon, acción, explosivo" },
+  { id: "minimalista", icon: Sparkles,    label: "Minimalista", desc: "Limpio, elegante" },
+  { id: "oscuro",      icon: Moon,        label: "Oscuro",      desc: "Dark, neon, noir" },
 ];
 
 const NICHOS = [
@@ -30,16 +32,16 @@ const NICHOS = [
 ];
 
 const FORMATOS = [
-  { id: "landscape", label: "📺 YouTube",  sub: "16:9",  size: "1792×1024" },
-  { id: "square",    label: "⬛ Cuadrado", sub: "1:1",   size: "1024×1024" },
-  { id: "portrait",  label: "📱 Shorts",   sub: "9:16",  size: "1024×1792" },
+  { id: "landscape", icon: Tv,         label: "YouTube",  sub: "16:9",  size: "1792×1024" },
+  { id: "square",    icon: Square,     label: "Cuadrado", sub: "1:1",   size: "1024×1024" },
+  { id: "portrait",  icon: Smartphone, label: "Shorts",   sub: "9:16",  size: "1024×1792" },
 ];
 
 const TEXTO_ESPACIO = [
-  { id: "izquierda", label: "← Izquierda" },
-  { id: "derecha",   label: "Derecha →" },
-  { id: "abajo",     label: "↓ Abajo" },
-  { id: "ninguno",   label: "Sin espacio" },
+  { id: "izquierda", icon: ArrowLeft,  label: "Izquierda" },
+  { id: "derecha",   icon: ArrowRight, label: "Derecha" },
+  { id: "abajo",     icon: ArrowDown,  label: "Abajo" },
+  { id: "ninguno",   icon: Minus,      label: "Sin espacio" },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -555,17 +557,18 @@ export default function MiniaturaPage() {
             <div className="flex rounded-xl p-1 gap-1"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
               {[
-                { id: "idea", label: "💡 Desde idea", icon: Wand2 },
-                { id: "url",  label: "🔗 Desde URL",  icon: LinkIcon },
+                { id: "idea", label: "Desde idea", icon: Wand2 },
+                { id: "url",  label: "Desde URL",  icon: LinkIcon },
               ].map(m => (
                 <button
                   key={m.id}
                   onClick={() => setModo(m.id as "idea" | "url")}
-                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all"
                   style={modo === m.id
                     ? { background: "linear-gradient(135deg, #ec4899, #f97316)", color: "#fff" }
                     : { color: "rgba(255,255,255,0.4)" }}
                 >
+                  <m.icon size={13} />
                   {m.label}
                 </button>
               ))}
@@ -633,21 +636,25 @@ export default function MiniaturaPage() {
                   Estilo visual
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {ESTILOS.map(e => (
-                    <button
-                      key={e.id}
-                      onClick={() => setEstilo(e.id)}
-                      className="flex flex-col items-start px-3 py-2 rounded-xl text-left transition-all"
-                      style={estilo === e.id
-                        ? { background: "rgba(236,72,153,0.15)", border: "1px solid rgba(236,72,153,0.4)" }
-                        : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
-                    >
-                      <span className="text-[11px] font-bold" style={{ color: estilo === e.id ? "#f9a8d4" : "rgba(255,255,255,0.7)" }}>
-                        {e.label}
-                      </span>
-                      <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.3)" }}>{e.desc}</span>
-                    </button>
-                  ))}
+                  {ESTILOS.map(e => {
+                    const EIcon = e.icon;
+                    return (
+                      <button
+                        key={e.id}
+                        onClick={() => setEstilo(e.id)}
+                        className="flex flex-col items-start px-3 py-2 rounded-xl text-left transition-all"
+                        style={estilo === e.id
+                          ? { background: "rgba(236,72,153,0.15)", border: "1px solid rgba(236,72,153,0.4)" }
+                          : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+                      >
+                        <span className="flex items-center gap-1.5 text-[11px] font-bold" style={{ color: estilo === e.id ? "#f9a8d4" : "rgba(255,255,255,0.7)" }}>
+                          <EIcon size={11} style={{ color: "#a78bfa" }} />
+                          {e.label}
+                        </span>
+                        <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.3)" }}>{e.desc}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -657,22 +664,25 @@ export default function MiniaturaPage() {
                   Formato de imagen
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {FORMATOS.map(f => (
-                    <button
-                      key={f.id}
-                      onClick={() => setFormato(f.id)}
-                      className="flex flex-col items-center py-2.5 px-1 rounded-xl transition-all"
-                      style={formato === f.id
-                        ? { background: "rgba(249,115,22,0.15)", border: "1px solid rgba(249,115,22,0.4)" }
-                        : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
-                    >
-                      <span className="text-base mb-0.5">{f.label.split(" ")[0]}</span>
-                      <span className="text-[10px] font-bold" style={{ color: formato === f.id ? "#fdba74" : "rgba(255,255,255,0.6)" }}>
-                        {f.label.split(" ").slice(1).join(" ")}
-                      </span>
-                      <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.3)" }}>{f.sub}</span>
-                    </button>
-                  ))}
+                  {FORMATOS.map(f => {
+                    const FIcon = f.icon;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => setFormato(f.id)}
+                        className="flex flex-col items-center py-2.5 px-1 rounded-xl transition-all"
+                        style={formato === f.id
+                          ? { background: "rgba(249,115,22,0.15)", border: "1px solid rgba(249,115,22,0.4)" }
+                          : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+                      >
+                        <FIcon size={16} className="mb-0.5" style={{ color: formato === f.id ? "#fdba74" : "#a78bfa" }} />
+                        <span className="text-[10px] font-bold" style={{ color: formato === f.id ? "#fdba74" : "rgba(255,255,255,0.6)" }}>
+                          {f.label}
+                        </span>
+                        <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.3)" }}>{f.sub}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -682,18 +692,22 @@ export default function MiniaturaPage() {
                   Espacio para texto
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {TEXTO_ESPACIO.map(t => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTextoEspacio(t.id)}
-                      className="py-1.5 px-2 rounded-lg text-[10px] font-semibold transition-all"
-                      style={textoEspacio === t.id
-                        ? { background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)", color: "#c4b5fd" }
-                        : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.4)" }}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
+                  {TEXTO_ESPACIO.map(t => {
+                    const TIcon = t.icon;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => setTextoEspacio(t.id)}
+                        className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] font-semibold transition-all"
+                        style={textoEspacio === t.id
+                          ? { background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)", color: "#c4b5fd" }
+                          : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.4)" }}
+                      >
+                        <TIcon size={10} style={{ color: "#a78bfa" }} />
+                        {t.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
