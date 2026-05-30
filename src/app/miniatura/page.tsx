@@ -48,9 +48,10 @@ const TEXTO_ESPACIO = [
 
 interface GeneratedImage { url: string; prompt: string; }
 
-/** Proxy DALL-E image through our server (only needed for fetch/download, not <img> tags) */
+/** Proxy external images through our server to avoid CORS. Data URIs pass through directly. */
 function proxyUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
+  if (originalUrl.startsWith("data:")) return originalUrl;
   return `/api/miniatura/image?u=${encodeURIComponent(originalUrl)}`;
 }
 
