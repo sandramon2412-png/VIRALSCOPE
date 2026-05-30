@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const maxDuration = 120;
 
 const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
-const REPLICATE_MODEL   = "cdingram/face-swap";
+const REPLICATE_MODEL   = "codeplugtech/face-swap";
 
 async function createPrediction(targetBase64: string, faceBase64: string): Promise<string> {
   const res = await fetch(`https://api.replicate.com/v1/models/${REPLICATE_MODEL}/predictions`, {
@@ -15,8 +15,8 @@ async function createPrediction(targetBase64: string, faceBase64: string): Promi
     },
     body: JSON.stringify({
       input: {
-        base_image: targetBase64,
-        swap_image: faceBase64,
+        target_image: targetBase64,  // imagen donde se inserta la cara
+        swap_image:   faceBase64,    // cara a insertar
       },
     }),
   });
