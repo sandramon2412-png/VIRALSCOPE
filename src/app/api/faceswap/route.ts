@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
 const REPLICATE_MODEL   = "fofr/face-swap-with-ideogram";
 
-async function pollPrediction(predictionId: string, timeoutMs = 90000): Promise<string> {
+async function safeJson(res: Response): Promise<unknown> {
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch { throw new Error(`Replicate respondió con texto no-JSON (${res.status}): ${text.slice(0, 300)}`); }
+}
+
+async function pollPrediction(predictionId: string, timeoutMs = 55000): Promise<string> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     await new Promise(r => setTimeout(r, 3000));
@@ -13,15 +19,16 @@ async function pollPrediction(predictionId: string, timeoutMs = 90000): Promise<
       headers: { "Authorization": `Bearer ${REPLICATE_API_KEY}` },
     });
     if (!res.ok) continue;
-    const data = await res.json();
+    const data = await safeJson(res) as Record<string, unknown>;
     if (data.status === "succeeded" && data.output) return String(data.output);
-    if (data.status === "failed") throw new Error(data.error ?? "Face swap fallido");
+    if (data.status === "failed") throw new Error(`Modelo falló: ${data.error ?? "sin detalle"}`);
   }
-  throw new Error("Timeout esperando resultado (90s)");
+  throw new Error("Timeout: el modelo tardó más de 55s");
 }
 
 async function urlToBase64(url: string): Promise<string> {
   const res = await fetch(url);
+  if (!res.ok) throw new Error(`No se pudo descargar resultado: ${res.status}`);
   const buffer = await res.arrayBuffer();
   const mime = res.headers.get("content-type") ?? "image/png";
   return `data:${mime};base64,${Buffer.from(buffer).toString("base64")}`;
@@ -34,18 +41,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const { thumbnailBase64, faceBase64 } = await req.json();
-
     if (!thumbnailBase64 || !faceBase64) {
       return NextResponse.json({ error: "Faltan imágenes" }, { status: 400 });
     }
 
-    // Replicate acepta data URIs base64 directamente como FileInput
+    // Replicate acepta data URIs base64 para imágenes < 256KB
     const res = await fetch(`https://api.replicate.com/v1/models/${REPLICATE_MODEL}/predictions`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${REPLICATE_API_KEY}`,
         "Content-Type": "application/json",
-        "Prefer": "wait=60",
+        "Prefer": "wait=55",
       },
       body: JSON.stringify({
         input: {
@@ -55,18 +61,18 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    const responseText = await res.text();
     if (!res.ok) {
-      throw new Error(`Replicate ${res.status}: ${responseText.slice(0, 300)}`);
+      const text = await res.text();
+      throw new Error(`Replicate ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const data = JSON.parse(responseText);
+    const data = await safeJson(res) as Record<string, unknown>;
 
     let outputUrl: string;
     if (data.status === "succeeded" && data.output) {
-      outputUrl = Array.isArray(data.output) ? String(data.output[0]) : String(data.output);
+      outputUrl = String(data.output);
     } else if (data.id) {
-      outputUrl = await pollPrediction(data.id);
+      outputUrl = await pollPrediction(String(data.id));
     } else {
       throw new Error(`Respuesta inesperada: ${JSON.stringify(data).slice(0, 200)}`);
     }
