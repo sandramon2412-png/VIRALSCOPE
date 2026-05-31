@@ -430,9 +430,12 @@ async function compressImage(base64: string, maxPx = 1024): Promise<string> {
         body: JSON.stringify({ thumbnailBase64: thumbCompressed, faceBase64: faceCompressed }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: { error?: string; imageBase64?: string; method?: string };
+      try { data = JSON.parse(text); }
+      catch { throw new Error(`Error del servidor: ${text.slice(0, 200)}`); }
       if (!res.ok) throw new Error(data.error || "Error en face swap");
-      setFaceSwapResult(data);
+      setFaceSwapResult(data as { imageBase64: string; method: string });
     } catch (e) {
       setFaceSwapError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
