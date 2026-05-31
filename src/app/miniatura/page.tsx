@@ -381,6 +381,24 @@ export default function MiniaturaPage() {
     e.target.value = "";
   }
 
+/** Comprime una imagen base64 a máx 512px y calidad JPEG 80% para no superar límites de Vercel */
+async function compressImage(base64: string, maxPx = 512): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.80));
+    };
+    img.src = base64;
+  });
+}
+
   async function handleFaceSwap() {
     if (!faceBase64 || images.length === 0) return;
     const thumbUrl = images[selectedThumbIdx]?.url;
@@ -401,10 +419,15 @@ export default function MiniaturaPage() {
         reader.readAsDataURL(thumbBlob);
       });
 
+      const [thumbCompressed, faceCompressed] = await Promise.all([
+        compressImage(thumbBase64),
+        compressImage(faceBase64),
+      ]);
+
       const res = await fetch("/api/faceswap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ thumbnailBase64: thumbBase64, faceBase64 }),
+        body: JSON.stringify({ thumbnailBase64: thumbCompressed, faceBase64: faceCompressed }),
       });
 
       const data = await res.json();
