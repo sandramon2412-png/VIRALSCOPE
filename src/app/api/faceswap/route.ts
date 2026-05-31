@@ -5,7 +5,34 @@ export const maxDuration = 120;
 const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
 const REPLICATE_MODEL   = "fofr/face-swap-with-ideogram";
 
-async function createPrediction(targetBase64: string, faceBase64: string): Promise<string> {
+// Sube una imagen base64 a Replicate Files API y devuelve la URL pública
+async function uploadImageToReplicate(base64DataUri: string): Promise<string> {
+  const match = base64DataUri.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error("Formato de imagen inválido");
+
+  const mimeType = match[1];
+  const buffer = Buffer.from(match[2], "base64");
+
+  const res = await fetch("https://api.replicate.com/v1/files", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${REPLICATE_API_KEY}`,
+      "Content-Type": mimeType,
+      "Content-Length": String(buffer.length),
+    },
+    body: buffer,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Error subiendo imagen: ${res.status} — ${text}`);
+  }
+
+  const data = await res.json();
+  return data.urls?.get ?? data.url;
+}
+
+async function createPrediction(targetUrl: string, faceUrl: string): Promise<string> {
   const res = await fetch(`https://api.replicate.com/v1/models/${REPLICATE_MODEL}/predictions`, {
     method: "POST",
     headers: {
@@ -15,8 +42,8 @@ async function createPrediction(targetBase64: string, faceBase64: string): Promi
     },
     body: JSON.stringify({
       input: {
-        character_image: faceBase64,   // foto de la cara del usuario
-        target_image:    targetBase64, // miniatura donde se inserta la cara
+        character_image: faceUrl,
+        target_image:    targetUrl,
       },
     }),
   });
@@ -28,12 +55,10 @@ async function createPrediction(targetBase64: string, faceBase64: string): Promi
 
   const data = await res.json();
 
-  // "Prefer: wait" devuelve el resultado directo si termina en <60s
   if (data.status === "succeeded" && data.output) {
     return data.output;
   }
 
-  // Si no terminó, hacemos polling
   if (data.id) {
     return await pollPrediction(data.id);
   }
@@ -86,10 +111,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Faltan imágenes" }, { status: 400 });
     }
 
-    // Replicate acepta base64 directamente como data URI
-    const outputUrl = await createPrediction(thumbnailBase64, faceBase64);
+    // Subir imágenes a Replicate para obtener URLs públicas
+    const [targetUrl, faceUrl] = await Promise.all([
+      uploadImageToReplicate(thumbnailBase64),
+      uploadImageToReplicate(faceBase64),
+    ]);
 
-    // Convertimos la URL de salida a base64 para devolverla al cliente
+    const outputUrl = await createPrediction(targetUrl, faceUrl);
+
     const resultBase64 = await urlToBase64(outputUrl);
 
     return NextResponse.json({ imageBase64: resultBase64, method: "replicate" });
