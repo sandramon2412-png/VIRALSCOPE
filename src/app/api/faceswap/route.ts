@@ -16,8 +16,8 @@ async function createPrediction(targetBase64: string, faceBase64: string): Promi
     body: JSON.stringify({
       version: REPLICATE_VERSION,
       input: {
-        target_image: targetBase64,
-        swap_image:   faceBase64,
+        input_image: targetBase64,
+        swap_image:  faceBase64,
       },
     }),
   });
