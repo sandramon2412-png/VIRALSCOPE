@@ -382,7 +382,8 @@ export default function MiniaturaPage() {
   }
 
 /** Comprime una imagen base64 a máx 1024px y calidad JPEG 90% para no superar límites de Vercel */
-async function compressImage(base64: string, maxPx = 1024): Promise<string> {
+// Replicate acepta base64 solo si < 256KB — comprimir a 512px/JPEG80 garantiza ~40-80KB
+async function compressImage(base64: string, maxPx = 512): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -393,7 +394,7 @@ async function compressImage(base64: string, maxPx = 1024): Promise<string> {
       canvas.width = w;
       canvas.height = h;
       canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/jpeg", 0.92));
+      resolve(canvas.toDataURL("image/jpeg", 0.80));
     };
     img.src = base64;
   });
