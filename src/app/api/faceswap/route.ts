@@ -7,11 +7,14 @@ const REPLICATE_MODEL   = "fofr/face-swap-with-ideogram";
 
 // Sube una imagen base64 a Replicate Files API y devuelve la URL pública
 async function uploadImageToReplicate(base64DataUri: string): Promise<string> {
-  const match = base64DataUri.match(/^data:([^;]+);base64,(.+)$/);
+  // El flag 's' permite que '.' coincida con saltos de línea en el base64
+  const match = base64DataUri.match(/^data:([^;]+);base64,(.+)$/s);
   if (!match) throw new Error("Formato de imagen inválido");
 
   const mimeType = match[1];
-  const buffer = Buffer.from(match[2], "base64");
+  const base64Data = match[2].replace(/\s/g, "");
+  const bytes = new Uint8Array(Buffer.from(base64Data, "base64"));
+  const blob = new Blob([bytes], { type: mimeType });
 
   const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
   const filename = `image.${ext}`;
@@ -21,10 +24,9 @@ async function uploadImageToReplicate(base64DataUri: string): Promise<string> {
     headers: {
       "Authorization": `Bearer ${REPLICATE_API_KEY}`,
       "Content-Type": mimeType,
-      "Content-Length": String(buffer.length),
       "Content-Disposition": `attachment; filename="${filename}"`,
     },
-    body: buffer,
+    body: blob,
   });
 
   if (!res.ok) {
