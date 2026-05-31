@@ -13,12 +13,16 @@ async function uploadImageToReplicate(base64DataUri: string): Promise<string> {
   const mimeType = match[1];
   const buffer = Buffer.from(match[2], "base64");
 
+  const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+  const filename = `image.${ext}`;
+
   const res = await fetch("https://api.replicate.com/v1/files", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${REPLICATE_API_KEY}`,
       "Content-Type": mimeType,
       "Content-Length": String(buffer.length),
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
     body: buffer,
   });
