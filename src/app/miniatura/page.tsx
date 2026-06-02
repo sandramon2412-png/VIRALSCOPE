@@ -410,7 +410,7 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
     setFaceSwapResult(null);
 
     try {
-      // Fetch the DALL-E thumbnail via proxy to avoid CORS
+      // Obtener miniatura como base64
       const thumbRes  = await fetch(proxyUrl(thumbUrl));
       const thumbBlob = await thumbRes.blob();
       const thumbBase64 = await new Promise<string>((resolve, reject) => {
@@ -425,18 +425,39 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
         compressImage(faceBase64),
       ]);
 
-      const res = await fetch("/api/faceswap", {
+      // Paso 1: iniciar predicción (retorna predictionId inmediatamente)
+      const startRes = await fetch("/api/faceswap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ thumbnailBase64: thumbCompressed, faceBase64: faceCompressed }),
       });
+      const startText = await startRes.text();
+      let startData: { error?: string; predictionId?: string };
+      try { startData = JSON.parse(startText); }
+      catch { throw new Error(`Error del servidor: ${startText.slice(0, 200)}`); }
+      if (!startRes.ok) throw new Error(startData.error || "Error iniciando face swap");
+      const { predictionId } = startData;
+      if (!predictionId) throw new Error("No se recibió ID de predicción");
 
-      const text = await res.text();
-      let data: { error?: string; imageBase64?: string; method?: string };
-      try { data = JSON.parse(text); }
-      catch { throw new Error(`Error del servidor: ${text.slice(0, 200)}`); }
-      if (!res.ok) throw new Error(data.error || "Error en face swap");
-      setFaceSwapResult(data as { imageBase64: string; method: string });
+      // Paso 2: polling hasta que termine (máx 90s)
+      const maxWait = 90000;
+      const started = Date.now();
+      while (Date.now() - started < maxWait) {
+        await new Promise(r => setTimeout(r, 3000));
+        const pollRes = await fetch(`/api/faceswap?id=${predictionId}`);
+        const pollText = await pollRes.text();
+        let pollData: { status?: string; error?: string; imageBase64?: string; method?: string };
+        try { pollData = JSON.parse(pollText); }
+        catch { throw new Error(`Error del servidor: ${pollText.slice(0, 200)}`); }
+        if (!pollRes.ok) throw new Error(pollData.error || "Error consultando estado");
+        if (pollData.status === "succeeded") {
+          setFaceSwapResult(pollData as { imageBase64: string; method: string });
+          return;
+        }
+        if (pollData.error) throw new Error(pollData.error);
+      }
+      throw new Error("Timeout: el modelo tardó demasiado (90s)");
+
     } catch (e) {
       setFaceSwapError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
