@@ -5,13 +5,6 @@ export const maxDuration = 10;
 const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
 const REPLICATE_MODEL   = "fofr/face-swap-with-ideogram";
 
-async function urlToBase64(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`No se pudo descargar resultado: ${res.status}`);
-  const buffer = await res.arrayBuffer();
-  const mime = res.headers.get("content-type") ?? "image/png";
-  return `data:${mime};base64,${Buffer.from(buffer).toString("base64")}`;
-}
 
 export async function POST(req: NextRequest) {
   if (!REPLICATE_API_KEY) {
@@ -79,9 +72,9 @@ export async function GET(req: NextRequest) {
     const status = String(data.status ?? "");
 
     if (status === "succeeded" && data.output) {
-      const outputUrl = String(data.output);
-      const imageBase64 = await urlToBase64(outputUrl);
-      return NextResponse.json({ status: "succeeded", imageBase64, method: "replicate" });
+      const outputUrl = Array.isArray(data.output) ? String(data.output[0]) : String(data.output);
+      // Devolver la URL directamente — el cliente la muestra vía proxy
+      return NextResponse.json({ status: "succeeded", outputUrl, method: "replicate" });
     }
 
     if (status === "failed") {
