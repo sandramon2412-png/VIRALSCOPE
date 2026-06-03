@@ -234,7 +234,7 @@ export default function MiniaturaPage() {
   // ── Face Swap state ──
   const [faceBase64, setFaceBase64]           = useState<string | null>(null);
   const [faceSwapLoading, setFaceSwapLoading] = useState(false);
-  const [faceSwapResult, setFaceSwapResult]   = useState<{ imageBase64: string; method: string } | null>(null);
+  const [faceSwapResult, setFaceSwapResult]   = useState<{ outputUrl: string; method: string } | null>(null);
   const [faceSwapError, setFaceSwapError]     = useState<string | null>(null);
   const [selectedThumbIdx, setSelectedThumbIdx] = useState(0);
   const [conCara, setConCara]                 = useState(false);
@@ -446,12 +446,12 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
         await new Promise(r => setTimeout(r, 3000));
         const pollRes = await fetch(`/api/faceswap?id=${predictionId}`);
         const pollText = await pollRes.text();
-        let pollData: { status?: string; error?: string; imageBase64?: string; method?: string };
+        let pollData: { status?: string; error?: string; outputUrl?: string; method?: string };
         try { pollData = JSON.parse(pollText); }
         catch { throw new Error(`Error del servidor: ${pollText.slice(0, 200)}`); }
         if (!pollRes.ok) throw new Error(pollData.error || "Error consultando estado");
-        if (pollData.status === "succeeded") {
-          setFaceSwapResult(pollData as { imageBase64: string; method: string });
+        if (pollData.status === "succeeded" && pollData.outputUrl) {
+          setFaceSwapResult({ outputUrl: pollData.outputUrl, method: pollData.method ?? "replicate" });
           return;
         }
         if (pollData.error) throw new Error(pollData.error);
@@ -468,7 +468,7 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
   function handleDownloadFaceSwap() {
     if (!faceSwapResult) return;
     const a    = document.createElement("a");
-    a.href     = faceSwapResult.imageBase64;
+    a.href     = `/api/download-image?url=${encodeURIComponent(faceSwapResult.outputUrl)}&filename=faceswap-${titulo.slice(0, 20).replace(/\s+/g, "-") || "miniatura"}.png`;
     a.download = `faceswap-${titulo.slice(0, 20).replace(/\s+/g, "-") || "miniatura"}.png`;
     a.click();
   }
@@ -1228,7 +1228,7 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
                       <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(59,130,246,0.3)" }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={faceSwapResult.imageBase64}
+                          src={proxyUrl(faceSwapResult.outputUrl)}
                           alt="Face swap result"
                           className="w-full h-auto block"
                         />
