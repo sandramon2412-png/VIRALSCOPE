@@ -439,11 +439,11 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
       const { predictionId } = startData;
       if (!predictionId) throw new Error("No se recibió ID de predicción");
 
-      // Paso 2: polling hasta que termine (máx 90s)
-      const maxWait = 90000;
+      // Paso 2: polling hasta que termine (máx 3 min)
+      const maxWait = 180000;
       const started = Date.now();
       while (Date.now() - started < maxWait) {
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
         const pollRes = await fetch(`/api/faceswap?id=${predictionId}`);
         const pollText = await pollRes.text();
         let pollData: { status?: string; error?: string; outputUrl?: string; method?: string };
@@ -455,8 +455,10 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
           return;
         }
         if (pollData.error) throw new Error(pollData.error);
+        // "canceled" también es un estado final
+        if (pollData.status === "canceled") throw new Error("La predicción fue cancelada por Replicate");
       }
-      throw new Error("Timeout: el modelo tardó demasiado (90s)");
+      throw new Error("Timeout: el modelo tardó más de 3 minutos");
 
     } catch (e) {
       setFaceSwapError(e instanceof Error ? e.message : "Error desconocido");
