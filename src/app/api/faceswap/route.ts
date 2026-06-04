@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const maxDuration = 10;
 
 const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
-// InsightFace-based model: rápido (~10-20s), buena calidad
-const REPLICATE_MODEL   = "xiankgx/face-swap";
+const REPLICATE_MODEL   = "omniedgeio/face-swap";
 
 
 export async function POST(req: NextRequest) {
