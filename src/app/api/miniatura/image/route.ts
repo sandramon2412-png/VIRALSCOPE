@@ -7,6 +7,8 @@ const ALLOWED_HOSTS = [
   "oaidalleapiprodscus.blob.core.windows.net",
   "oaidalleapiprodeus.blob.core.windows.net",
   "dalleprodsec.blob.core.windows.net",
+  "replicate.delivery",
+  "pbxt.replicate.delivery",
 ];
 
 function isAllowedHost(hostname: string): boolean {
