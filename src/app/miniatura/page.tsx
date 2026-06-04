@@ -1228,7 +1228,7 @@ async function compressImage(base64: string, maxPx = 512): Promise<string> {
                       <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(59,130,246,0.3)" }}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={proxyUrl(faceSwapResult.outputUrl)}
+                          src={faceSwapResult.outputUrl}
                           alt="Face swap result"
                           className="w-full h-auto block"
                         />
