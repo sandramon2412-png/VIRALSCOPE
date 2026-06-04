@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export const maxDuration = 10;
 
 const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
-const REPLICATE_MODEL   = "fofr/face-swap-with-ideogram";
+// InsightFace-based model: rápido (~10-20s), buena calidad
+const REPLICATE_MODEL   = "xiankgx/face-swap";
 
 
 export async function POST(req: NextRequest) {
@@ -26,8 +27,8 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         input: {
-          character_image: faceBase64,
-          target_image:    thumbnailBase64,
+          source_image: faceBase64,
+          target_image: thumbnailBase64,
         },
       }),
     });
