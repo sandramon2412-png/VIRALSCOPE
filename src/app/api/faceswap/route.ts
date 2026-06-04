@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     });
 
     const text = await res.text();
+    if (res.status === 429) throw new Error("Límite de peticiones alcanzado. Espera 5 segundos e inténtalo de nuevo.");
     if (!res.ok) throw new Error(`Replicate ${res.status}: ${text.slice(0, 300)}`);
 
     let data: Record<string, unknown>;
