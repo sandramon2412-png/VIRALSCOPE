@@ -73,7 +73,8 @@ export default function CrearShortPage() {
       const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
       fetchFileRef.current = fetchFile;
       const ff = new FFmpeg();
-      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+      // jsDelivr es más rápido y estable que unpkg globalmente
+      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
       await ff.load({
         coreURL:  await toBlobURL(`${baseURL}/ffmpeg-core.js`,   "text/javascript"),
         wasmURL:  await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
@@ -81,7 +82,11 @@ export default function CrearShortPage() {
       ffmpegRef.current = ff;
       setFfmpegReady(true);
     }
-    loadFfmpeg().catch(console.error);
+    loadFfmpeg().catch(e => {
+      console.error("ffmpeg load error:", e);
+      // Mostrar error al usuario si falla la carga
+      setSteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: "error", detail: "Error cargando motor de video. Recarga la página." } : s));
+    });
   }, []);
 
   function setStep(id: string, status: Step["status"], detail?: string) {
