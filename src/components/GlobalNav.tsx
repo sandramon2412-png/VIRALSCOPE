@@ -10,7 +10,7 @@ import {
   Palette, Sparkles, Box, FileText, Hash, TestTube2, Layout,
   Film, PenTool, Package, BookOpen, CalendarDays, Target,
   Calculator, Globe, DollarSign, CreditCard, GraduationCap,
-  FolderOpen, Wand2, Kanban,
+  FolderOpen, Wand2, Kanban, Video,
 } from "lucide-react";
 import NavAuth from "@/components/NavAuth";
 
@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/plantillas-capcut", label: "Plantillas CapCut", icon: Film },
       { href: "/prompts-edicion", label: "Prompts Edición", icon: PenTool },
       { href: "/recursos", label: "Recursos por Nicho", icon: Package },
+      { href: "/crear-short", label: "Crear Short", icon: Video },
     ]
   },
   {
