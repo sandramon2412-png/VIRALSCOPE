@@ -9,11 +9,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "PEXELS_API_KEY no configurada" }, { status: 503 });
   }
 
-  const query = req.nextUrl.searchParams.get("q") ?? "nature";
+  const query   = req.nextUrl.searchParams.get("q") ?? "nature";
   const perPage = Math.min(parseInt(req.nextUrl.searchParams.get("n") ?? "5"), 10);
+  const type    = req.nextUrl.searchParams.get("type") ?? "video";
 
+  // ── Fotos ─────────────────────────────────────────────────────────────────
+  if (type === "photo") {
+    const res = await fetch(
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${perPage}&orientation=portrait`,
+      { headers: { Authorization: PEXELS_API_KEY } }
+    );
+    if (!res.ok) return NextResponse.json({ error: `Pexels ${res.status}` }, { status: 502 });
+
+    const data = await res.json() as {
+      photos: Array<{ id: number; src: { large2x: string; large: string; medium: string }; }>;
+    };
+
+    const photos = data.photos.map(p => ({
+      id: p.id,
+      url: p.src.large2x || p.src.large || p.src.medium,
+      thumb: p.src.medium,
+    })).filter(p => p.url);
+
+    return NextResponse.json({ photos });
+  }
+
+  // ── Videos ────────────────────────────────────────────────────────────────
   const res = await fetch(
-    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&orientation=portrait&size=medium`,
+    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&orientation=portrait&size=small`,
     { headers: { Authorization: PEXELS_API_KEY } }
   );
 

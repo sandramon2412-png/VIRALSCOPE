@@ -3,14 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import GlobalNav from "@/components/GlobalNav";
 import {
-  Video, Mic, Download, Loader2, Play, Pause,
+  Video, Download, Loader2, Play, Pause,
   Sparkles, ChevronRight, CheckCircle, AlertCircle,
-  Zap, Film, Music,
+  Zap, Film, Music, Image,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface PexelsVideo { id: number; url: string; thumb: string; duration: number; }
+interface PexelsPhoto { id: number; url: string; thumb: string; }
 
 interface Step {
   id: string;
@@ -32,32 +32,153 @@ const DURACIONES = [
   { val: "60 seg", label: "60 seg" },
 ];
 
+// ─── Canvas + MediaRecorder renderer ─────────────────────────────────────────
+
+async function loadImage(proxyUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`No se pudo cargar: ${proxyUrl}`));
+    img.src = proxyUrl;
+  });
+}
+
+async function renderShort(
+  photos: PexelsPhoto[],
+  audioBlob: Blob,
+  onProgress: (msg: string) => void,
+): Promise<string> {
+  if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
+
+  // ── Cargar imágenes ──────────────────────────────────────────────────────
+  onProgress("Cargando imágenes...");
+  const images = await Promise.all(
+    photos.map(p =>
+      loadImage(`/api/download-image?url=${encodeURIComponent(p.url)}&filename=bg.jpg`)
+    )
+  );
+
+  // ── Decodificar audio ────────────────────────────────────────────────────
+  onProgress("Procesando audio...");
+  const audioCtx = new AudioContext();
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  const duration = audioBuffer.duration;
+
+  // ── Canvas 9:16 ──────────────────────────────────────────────────────────
+  const W = 608, H = 1080;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+
+  // ── Routing de audio → MediaStream ──────────────────────────────────────
+  const dest = audioCtx.createMediaStreamDestination();
+  const src  = audioCtx.createBufferSource();
+  src.buffer = audioBuffer;
+  src.connect(dest);
+
+  const canvasStream = canvas.captureStream(30);
+  dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+
+  // ── MediaRecorder ────────────────────────────────────────────────────────
+  const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+    ? "video/webm;codecs=vp9,opus"
+    : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+    ? "video/webm;codecs=vp8,opus"
+    : "video/webm";
+
+  const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 3_000_000 });
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+  return new Promise((resolve, reject) => {
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: mimeType });
+      resolve(URL.createObjectURL(blob));
+    };
+    recorder.onerror = e => reject(e);
+
+    recorder.start(200);
+    src.start(0);
+
+    const startTs   = performance.now();
+    const imgSlot   = duration / images.length; // segundos por imagen
+
+    function drawFrame() {
+      const elapsed = (performance.now() - startTs) / 1000;
+
+      // Parar cuando termine el audio (+0.3s margen)
+      if (elapsed >= duration + 0.3) {
+        recorder.stop();
+        audioCtx.close();
+        return;
+      }
+
+      const imgIdx  = Math.min(Math.floor(elapsed / imgSlot), images.length - 1);
+      const imgProg = (elapsed % imgSlot) / imgSlot; // 0–1 dentro de esta imagen
+      const img     = images[imgIdx];
+
+      // Ken Burns: zoom suave desde 1× a 1.08×
+      const scale  = 1 + imgProg * 0.08;
+      // Encuadrar para cubrir todo el canvas (cover)
+      const ratio  = Math.max(W / img.naturalWidth, H / img.naturalHeight) * scale;
+      const dw     = img.naturalWidth  * ratio;
+      const dh     = img.naturalHeight * ratio;
+      const dx     = (W - dw) / 2;
+      const dy     = (H - dh) / 2;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.drawImage(img, dx, dy, dw, dh);
+
+      // Fade suave a la siguiente imagen (último 15% de cada slot)
+      if (imgProg > 0.85 && imgIdx + 1 < images.length) {
+        const alpha  = (imgProg - 0.85) / 0.15;
+        const next   = images[imgIdx + 1];
+        const nRatio = Math.max(W / next.naturalWidth, H / next.naturalHeight);
+        const nw     = next.naturalWidth  * nRatio;
+        const nh     = next.naturalHeight * nRatio;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(next, (W - nw) / 2, (H - nh) / 2, nw, nh);
+        ctx.globalAlpha = 1;
+      }
+
+      // Overlay semitransparente abajo (estilo subtítulo)
+      const grad = ctx.createLinearGradient(0, H * 0.65, 0, H);
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(1, "rgba(0,0,0,0.65)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, H * 0.65, W, H * 0.35);
+
+      requestAnimationFrame(drawFrame);
+    }
+
+    onProgress("Grabando...");
+    drawFrame();
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CrearShortPage() {
-  const [tema, setTema]           = useState("");
-  const [guionExt, setGuionExt]   = useState(""); // guión importado
-  const [duracion, setDuracion]   = useState("45 seg");
-  const [voiceId, setVoiceId]     = useState(VOICES[0].id);
-  const [guion, setGuion]         = useState("");
-  const [videoUrl, setVideoUrl]   = useState<string | null>(null);
+  const [tema, setTema]         = useState("");
+  const [guionExt, setGuionExt] = useState("");
+  const [duracion, setDuracion] = useState("45 seg");
+  const [voiceId, setVoiceId]   = useState(VOICES[0].id);
+  const [guion, setGuion]       = useState("");
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [ffmpegReady, setFfmpegReady] = useState(false);
+  const [videoMime, setVideoMime] = useState("video/webm");
   const [steps, setSteps] = useState<Step[]>([
-    { id: "script",  label: "Generando guión",        status: "idle" },
-    { id: "videos",  label: "Buscando clips Pexels",  status: "idle" },
-    { id: "audio",   label: "Generando voz (ElevenLabs)", status: "idle" },
-    { id: "render",  label: "Montando video",          status: "idle" },
+    { id: "script", label: "Generando guión",           status: "idle" },
+    { id: "photos", label: "Buscando imágenes Pexels",  status: "idle" },
+    { id: "audio",  label: "Generando voz (ElevenLabs)", status: "idle" },
+    { id: "render", label: "Montando video",             status: "idle" },
   ]);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ffmpegRef     = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fetchFileRef  = useRef<((src: any) => Promise<Uint8Array>) | null>(null);
-  const videoRef      = useRef<HTMLVideoElement>(null);
+  const videoRef   = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
 
-  // Leer guión pasado desde /guion como query param
+  // Leer guión/tema desde query params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const g = params.get("guion");
@@ -66,37 +187,12 @@ export default function CrearShortPage() {
     if (t) setTema(decodeURIComponent(t));
   }, []);
 
-  // Cargar ffmpeg.wasm desde CDN al montar (import dinámico para evitar crash SSR)
-  useEffect(() => {
-    async function loadFfmpeg() {
-      const { FFmpeg }           = await import("@ffmpeg/ffmpeg");
-      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
-      fetchFileRef.current = fetchFile;
-      const ff = new FFmpeg();
-      // jsDelivr es más rápido y estable que unpkg globalmente
-      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
-      await ff.load({
-        coreURL:  await toBlobURL(`${baseURL}/ffmpeg-core.js`,   "text/javascript"),
-        wasmURL:  await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-      });
-      ffmpegRef.current = ff;
-      setFfmpegReady(true);
-    }
-    loadFfmpeg().catch(e => {
-      console.error("ffmpeg load error:", e);
-      // Mostrar error al usuario si falla la carga
-      setSteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: "error", detail: "Error cargando motor de video. Recarga la página." } : s));
-    });
-  }, []);
-
   function setStep(id: string, status: Step["status"], detail?: string) {
     setSteps(prev => prev.map(s => s.id === id ? { ...s, status, detail } : s));
   }
 
   async function handleGenerate() {
     if (!tema.trim() && !guion.trim()) return;
-    if (!ffmpegReady) { alert("FFmpeg aún cargando, espera un momento"); return; }
-
     setIsRunning(true);
     setVideoUrl(null);
     setSteps(prev => prev.map(s => ({ ...s, status: "idle", detail: undefined })));
@@ -112,7 +208,6 @@ export default function CrearShortPage() {
           body: JSON.stringify({ tema, duracion, tipoCanal: "faceless", nicho: "general" }),
         });
         if (!res.ok) throw new Error("Error generando guión");
-        // El guión usa SSE — leer stream completo
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let full = "";
@@ -120,8 +215,7 @@ export default function CrearShortPage() {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value);
-          const lines = chunk.split("\n");
-          for (const line of lines) {
+          for (const line of chunk.split("\n")) {
             if (line.startsWith("data: ")) {
               try { const d = JSON.parse(line.slice(6)); if (d.text) full += d.text; } catch {}
             }
@@ -132,17 +226,15 @@ export default function CrearShortPage() {
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
 
-      // Extraer palabras clave para Pexels (primeras 3 palabras del tema)
+      // ── 2. Fotos Pexels ───────────────────────────────────────────────────
+      setStep("photos", "loading");
       const keywords = tema || scriptText.slice(0, 50);
-      const pexelsQuery = keywords.split(/\s+/).slice(0, 3).join(" ");
-
-      // ── 2. Videos de Pexels ──────────────────────────────────────────────
-      setStep("videos", "loading");
-      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(pexelsQuery)}&n=5`);
-      if (!pvRes.ok) throw new Error("Error buscando videos en Pexels");
-      const { videos: pexelsVideos }: { videos: PexelsVideo[] } = await pvRes.json();
-      if (!pexelsVideos.length) throw new Error("No se encontraron videos para este tema");
-      setStep("videos", "done", `${pexelsVideos.length} clips encontrados`);
+      const q = keywords.split(/\s+/).slice(0, 3).join(" ");
+      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(q)}&n=5&type=photo`);
+      if (!pvRes.ok) throw new Error("Error buscando imágenes en Pexels");
+      const { photos }: { photos: PexelsPhoto[] } = await pvRes.json();
+      if (!photos?.length) throw new Error("No se encontraron imágenes para este tema");
+      setStep("photos", "done", `${photos.length} imágenes encontradas`);
 
       // ── 3. TTS ───────────────────────────────────────────────────────────
       setStep("audio", "loading");
@@ -153,61 +245,21 @@ export default function CrearShortPage() {
       });
       if (!ttsRes.ok) throw new Error("Error generando voz");
       const audioBlob = await ttsRes.blob();
+      if (audioBlob.size < 500) throw new Error(`Audio vacío (${audioBlob.size} bytes)`);
       setStep("audio", "done");
 
-      // ── 4. Render con ffmpeg.wasm ─────────────────────────────────────────
-      setStep("render", "loading", "Descargando clip...");
-      const ff = ffmpegRef.current!;
-      const fetchFile = fetchFileRef.current!;
+      // ── 4. Render Canvas + MediaRecorder ──────────────────────────────────
+      setStep("render", "loading", "Iniciando...");
+      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+        ? "video/webm" : "video/webm";
+      setVideoMime(mime);
 
-      // Validar audio
-      if (audioBlob.size < 500) throw new Error(`Audio vacío (${audioBlob.size} bytes). Verifica ElevenLabs.`);
-      await ff.writeFile("audio.mp3", await fetchFile(audioBlob));
-
-      // Descargar solo el primer clip y verificar que no esté vacío
-      const vRes = await fetch(`/api/proxy-video?url=${encodeURIComponent(pexelsVideos[0].url)}`);
-      if (!vRes.ok) throw new Error(`Error descargando clip: ${vRes.status}`);
-      const vBlob = await vRes.blob();
-      if (vBlob.size < 10000) throw new Error(`Clip vacío (${vBlob.size} bytes). CORS o URL inválida.`);
-      await ff.writeFile("clip.mp4", await fetchFile(vBlob));
-
-      // Repetir el clip en list.txt para tener suficiente duración (~90s)
-      const loops = "file clip.mp4\n".repeat(8);
-      await ff.writeFile("list.txt", loops);
-
-      setStep("render", "loading", "Codificando video...");
-
-      // Paso 1: concat + escalar a 9:16 con padding negro (sin distorsión)
-      await ff.exec([
-        "-f", "concat", "-safe", "0", "-i", "list.txt",
-        "-vf", "scale=608:1080:force_original_aspect_ratio=decrease,pad=608:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
-        "-c:v", "libx264", "-preset", "ultrafast", "-r", "25", "-an",
-        "-t", "75",
-        "concat.mp4",
-      ]);
-
-      setStep("render", "loading", "Mezclando audio...");
-
-      // Paso 2: combinar video + voz, recortar al final del audio
-      await ff.exec([
-        "-i", "concat.mp4",
-        "-i", "audio.mp3",
-        "-map", "0:v", "-map", "1:a",
-        "-c:v", "copy", "-c:a", "aac",
-        "-shortest",
-        "output.mp4",
-      ]);
-
-      // Leer resultado
-      const outputData = await ff.readFile("output.mp4");
-      const outputBlob = new Blob([outputData], { type: "video/mp4" });
-      const url = URL.createObjectURL(outputBlob);
+      const url = await renderShort(photos, audioBlob, msg => setStep("render", "loading", msg));
       setVideoUrl(url);
       setStep("render", "done", "¡Video listo!");
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Error desconocido";
-      // Marcar el step activo como error
       setSteps(prev => prev.map(s => s.status === "loading" ? { ...s, status: "error", detail: msg } : s));
       console.error(err);
     } finally {
@@ -219,7 +271,8 @@ export default function CrearShortPage() {
     if (!videoUrl) return;
     const a = document.createElement("a");
     a.href = videoUrl;
-    a.download = `short-${tema.slice(0, 30).replace(/\s+/g, "-") || "viralscope"}.mp4`;
+    const ext = videoMime.includes("mp4") ? "mp4" : "webm";
+    a.download = `short-${(tema.slice(0, 30) || "viralscope").replace(/\s+/g, "-")}.${ext}`;
     a.click();
   }
 
@@ -229,7 +282,7 @@ export default function CrearShortPage() {
     else { videoRef.current.play(); setPlaying(true); }
   }
 
-  const canGenerate = (tema.trim() || guion.trim()) && ffmpegReady && !isRunning;
+  const canGenerate = (tema.trim() || guion.trim()) && !isRunning;
 
   return (
     <div className="min-h-screen" style={{ background: "#0a0812" }}>
@@ -243,33 +296,24 @@ export default function CrearShortPage() {
             <h1 className="text-3xl font-bold text-white">Crear Short con IA</h1>
           </div>
           <p className="text-slate-400 text-sm">
-            Guión → Voz → Clips de Pexels → Video MP4 listo para TikTok / Reels / Shorts
+            Guión → Voz → Imágenes Pexels → Video listo para TikTok / Reels / Shorts
           </p>
-          {!ffmpegReady && (
-            <div className="flex items-center justify-center gap-2 text-yellow-400 text-xs">
-              <Loader2 size={12} className="animate-spin" />
-              Cargando motor de video (ffmpeg.wasm)...
-            </div>
-          )}
-          {ffmpegReady && (
-            <div className="flex items-center justify-center gap-1 text-green-400 text-xs">
-              <CheckCircle size={12} /> Motor listo — procesamiento 100% en tu navegador
-            </div>
-          )}
+          <div className="flex items-center justify-center gap-1 text-green-400 text-xs">
+            <CheckCircle size={12} /> Sin descargas — procesamiento nativo en tu navegador
+          </div>
         </div>
 
         {/* Config */}
         <div className="rounded-2xl p-5 space-y-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(139,92,246,0.2)" }}>
 
-          {guionExt ? (
+          {guionExt && (
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Guión importado</label>
               <div className="rounded-xl p-3 text-xs text-slate-300" style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)", maxHeight: 120, overflowY: "auto" }}>
                 {guionExt.slice(0, 400)}{guionExt.length > 400 ? "..." : ""}
               </div>
-              <p className="text-[10px] text-slate-500">Se usará este guión. También puedes escribir un tema nuevo abajo.</p>
             </div>
-          ) : null}
+          )}
 
           <div className="space-y-1">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
@@ -289,16 +333,13 @@ export default function CrearShortPage() {
               <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Duración</label>
               <div className="flex gap-2">
                 {DURACIONES.map(d => (
-                  <button
-                    key={d.val}
-                    onClick={() => setDuracion(d.val)}
+                  <button key={d.val} onClick={() => setDuracion(d.val)}
                     className="flex-1 py-2 rounded-lg text-xs font-bold transition-all"
                     style={{
                       background: duracion === d.val ? "rgba(139,92,246,0.3)" : "rgba(255,255,255,0.05)",
                       border: `1px solid ${duracion === d.val ? "rgba(139,92,246,0.6)" : "rgba(255,255,255,0.08)"}`,
                       color: duracion === d.val ? "#a78bfa" : "#94a3b8",
-                    }}
-                  >
+                    }}>
                     {d.label}
                   </button>
                 ))}
@@ -307,49 +348,36 @@ export default function CrearShortPage() {
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Voz</label>
-              <select
-                value={voiceId}
-                onChange={e => setVoiceId(e.target.value)}
+              <select value={voiceId} onChange={e => setVoiceId(e.target.value)}
                 className="w-full rounded-xl px-3 py-2 text-sm text-white outline-none"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}
-              >
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}>
                 {VOICES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
               </select>
             </div>
           </div>
 
-          <button
-            onClick={handleGenerate}
-            disabled={!canGenerate}
+          <button onClick={handleGenerate} disabled={!canGenerate}
             className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all"
             style={{
               background: canGenerate ? "linear-gradient(135deg, #7c3aed, #a855f7)" : "rgba(255,255,255,0.05)",
               opacity: canGenerate ? 1 : 0.5,
               cursor: canGenerate ? "pointer" : "not-allowed",
-            }}
-          >
+            }}>
             {isRunning ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
             {isRunning ? "Generando..." : "Crear Short"}
           </button>
         </div>
 
-        {/* Steps progress */}
+        {/* Steps */}
         {steps.some(s => s.status !== "idle") && (
           <div className="rounded-2xl p-5 space-y-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
             {steps.map((step, i) => (
               <div key={step.id} className="flex items-center gap-3">
                 <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{
-                    background: step.status === "done" ? "rgba(34,197,94,0.2)"
-                      : step.status === "loading" ? "rgba(139,92,246,0.2)"
-                      : step.status === "error" ? "rgba(239,68,68,0.2)"
-                      : "rgba(255,255,255,0.05)",
-                    border: `1px solid ${step.status === "done" ? "rgba(34,197,94,0.4)"
-                      : step.status === "loading" ? "rgba(139,92,246,0.4)"
-                      : step.status === "error" ? "rgba(239,68,68,0.4)"
-                      : "rgba(255,255,255,0.1)"}`,
-                  }}
-                >
+                    background: step.status === "done" ? "rgba(34,197,94,0.2)" : step.status === "loading" ? "rgba(139,92,246,0.2)" : step.status === "error" ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)",
+                    border: `1px solid ${step.status === "done" ? "rgba(34,197,94,0.4)" : step.status === "loading" ? "rgba(139,92,246,0.4)" : step.status === "error" ? "rgba(239,68,68,0.4)" : "rgba(255,255,255,0.1)"}`,
+                  }}>
                   {step.status === "done"    && <CheckCircle size={14} className="text-green-400" />}
                   {step.status === "loading" && <Loader2 size={14} className="animate-spin" style={{ color: "#a78bfa" }} />}
                   {step.status === "error"   && <AlertCircle size={14} className="text-red-400" />}
@@ -359,9 +387,7 @@ export default function CrearShortPage() {
                   <p className={`text-sm font-medium ${step.status === "done" ? "text-green-300" : step.status === "error" ? "text-red-300" : step.status === "loading" ? "text-violet-300" : "text-slate-500"}`}>
                     {step.label}
                   </p>
-                  {step.detail && (
-                    <p className="text-xs text-slate-500 mt-0.5">{step.detail}</p>
-                  )}
+                  {step.detail && <p className="text-xs text-slate-500 mt-0.5">{step.detail}</p>}
                 </div>
                 {step.status === "idle" && i > 0 && <ChevronRight size={14} className="text-slate-700" />}
               </div>
@@ -377,29 +403,18 @@ export default function CrearShortPage() {
                 <CheckCircle size={18} className="text-green-400" />
                 <span className="font-bold text-green-300">¡Short listo!</span>
               </div>
-              <button
-                onClick={handleDownload}
+              <button onClick={handleDownload}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-white text-sm"
-                style={{ background: "linear-gradient(135deg, #1d4ed8, #3b82f6)" }}
-              >
-                <Download size={15} /> Descargar MP4
+                style={{ background: "linear-gradient(135deg, #1d4ed8, #3b82f6)" }}>
+                <Download size={15} /> Descargar
               </button>
             </div>
 
             <div className="relative rounded-xl overflow-hidden mx-auto" style={{ maxWidth: 320, background: "#000" }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                className="w-full"
-                playsInline
-                onEnded={() => setPlaying(false)}
-              />
-              <button
-                onClick={togglePlay}
+              <video ref={videoRef} src={videoUrl} className="w-full" playsInline onEnded={() => setPlaying(false)} />
+              <button onClick={togglePlay}
                 className="absolute inset-0 flex items-center justify-center"
-                style={{ background: playing ? "transparent" : "rgba(0,0,0,0.4)" }}
-              >
+                style={{ background: playing ? "transparent" : "rgba(0,0,0,0.4)" }}>
                 {!playing && (
                   <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: "rgba(139,92,246,0.8)" }}>
                     <Play size={24} className="text-white ml-1" />
@@ -409,11 +424,7 @@ export default function CrearShortPage() {
             </div>
 
             <div className="grid grid-cols-3 gap-2 text-center">
-              {[
-                { icon: Film, label: "TikTok" },
-                { icon: Video, label: "Reels" },
-                { icon: Zap, label: "Shorts" },
-              ].map(({ icon: Icon, label }) => (
+              {[{ icon: Film, label: "TikTok" }, { icon: Video, label: "Reels" }, { icon: Zap, label: "Shorts" }].map(({ icon: Icon, label }) => (
                 <div key={label} className="rounded-xl py-2 text-xs text-slate-400" style={{ background: "rgba(255,255,255,0.04)" }}>
                   <Icon size={16} style={{ color: "#a78bfa" }} className="mx-auto mb-1" />
                   {label}
@@ -436,10 +447,9 @@ export default function CrearShortPage() {
           </div>
         )}
 
-        {/* Info */}
         <div className="text-center text-xs text-slate-600 pb-4">
-          El video se procesa en tu navegador — nada se sube a servidores externos.
-          <br />Clips: <a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="underline">Pexels</a> (licencia gratuita) · Voz: ElevenLabs · Motor: ffmpeg.wasm
+          Procesamiento nativo — sin descargas pesadas.
+          <br />Imágenes: <a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="underline">Pexels</a> · Voz: ElevenLabs · Motor: Canvas + MediaRecorder
         </div>
 
       </div>
