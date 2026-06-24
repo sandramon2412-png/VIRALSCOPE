@@ -151,40 +151,39 @@ export default function CrearShortPage() {
       setStep("audio", "done");
 
       // ── 4. Render con ffmpeg.wasm ─────────────────────────────────────────
-      setStep("render", "loading", "Descargando clips...");
+      setStep("render", "loading", "Descargando clip...");
       const ff = ffmpegRef.current!;
       const fetchFile = fetchFileRef.current!;
 
-      // Descargar audio
+      // Validar audio
+      if (audioBlob.size < 500) throw new Error(`Audio vacío (${audioBlob.size} bytes). Verifica ElevenLabs.`);
       await ff.writeFile("audio.mp3", await fetchFile(audioBlob));
 
-      // Descargar clips de video (máx 3 para no exceder memoria)
-      const clipCount = Math.min(pexelsVideos.length, 3);
-      for (let i = 0; i < clipCount; i++) {
-        setStep("render", "loading", `Descargando clip ${i + 1}/${clipCount}...`);
-        const vBlob = await fetch(pexelsVideos[i].url).then(r => r.blob());
-        await ff.writeFile(`clip${i}.mp4`, await fetchFile(vBlob));
-      }
+      // Descargar solo el primer clip y verificar que no esté vacío
+      const vRes = await fetch(`/api/proxy-video?url=${encodeURIComponent(pexelsVideos[0].url)}`);
+      if (!vRes.ok) throw new Error(`Error descargando clip: ${vRes.status}`);
+      const vBlob = await vRes.blob();
+      if (vBlob.size < 10000) throw new Error(`Clip vacío (${vBlob.size} bytes). CORS o URL inválida.`);
+      await ff.writeFile("clip.mp4", await fetchFile(vBlob));
 
-      // Crear lista de concatenación
-      let concatList = "";
-      for (let i = 0; i < clipCount; i++) concatList += `file 'clip${i}.mp4'\n`;
-      await ff.writeFile("list.txt", concatList);
+      // Repetir el clip en list.txt para tener suficiente duración (~90s)
+      const loops = "file clip.mp4\n".repeat(8);
+      await ff.writeFile("list.txt", loops);
 
-      setStep("render", "loading", "Concatenando clips...");
+      setStep("render", "loading", "Codificando video...");
 
-      // Concatenar clips en vertical (9:16), agregar audio, recortar a duración del audio
-      // Paso 1: concatenar clips
+      // Paso 1: concat + escalar a 9:16 con padding negro (sin distorsión)
       await ff.exec([
         "-f", "concat", "-safe", "0", "-i", "list.txt",
-        "-vf", "scale=608:1080,setsar=1",
-        "-c:v", "libx264", "-preset", "ultrafast", "-an",
+        "-vf", "scale=608:1080:force_original_aspect_ratio=decrease,pad=608:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+        "-c:v", "libx264", "-preset", "ultrafast", "-r", "25", "-an",
+        "-t", "75",
         "concat.mp4",
       ]);
 
       setStep("render", "loading", "Mezclando audio...");
 
-      // Paso 2: mezclar con audio y recortar a duración del audio
+      // Paso 2: combinar video + voz, recortar al final del audio
       await ff.exec([
         "-i", "concat.mp4",
         "-i", "audio.mp3",

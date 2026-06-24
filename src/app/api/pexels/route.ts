@@ -30,11 +30,12 @@ export async function GET(req: NextRequest) {
     }>;
   };
 
-  // Devolver solo la URL del archivo de mejor calidad HD (máx 1080p)
+  // Preferir 480p–720p: suficiente calidad pero mucho menos peso para ffmpeg.wasm
   const videos = data.videos.map(v => {
     const hd = v.video_files
-      .filter(f => f.height <= 1080 && f.height >= 480)
-      .sort((a, b) => b.height - a.height)[0];
+      .filter(f => f.height <= 720 && f.height >= 360)
+      .sort((a, b) => b.height - a.height)[0]
+      ?? v.video_files.sort((a, b) => a.height - b.height)[0];
     return {
       id: v.id,
       duration: v.duration,
