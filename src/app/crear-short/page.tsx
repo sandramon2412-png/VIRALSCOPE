@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import GlobalNav from "@/components/GlobalNav";
 import {
   Video, Mic, Download, Loader2, Play, Pause,
@@ -52,8 +50,11 @@ export default function CrearShortPage() {
     { id: "render",  label: "Montando video",          status: "idle" },
   ]);
 
-  const ffmpegRef  = useRef<FFmpeg | null>(null);
-  const videoRef   = useRef<HTMLVideoElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ffmpegRef     = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fetchFileRef  = useRef<((src: any) => Promise<Uint8Array>) | null>(null);
+  const videoRef      = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
 
   // Leer guión pasado desde /guion como query param
@@ -65,9 +66,12 @@ export default function CrearShortPage() {
     if (t) setTema(decodeURIComponent(t));
   }, []);
 
-  // Cargar ffmpeg.wasm desde CDN al montar
+  // Cargar ffmpeg.wasm desde CDN al montar (import dinámico para evitar crash SSR)
   useEffect(() => {
     async function loadFfmpeg() {
+      const { FFmpeg }           = await import("@ffmpeg/ffmpeg");
+      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
+      fetchFileRef.current = fetchFile;
       const ff = new FFmpeg();
       const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
       await ff.load({
@@ -149,6 +153,7 @@ export default function CrearShortPage() {
       // ── 4. Render con ffmpeg.wasm ─────────────────────────────────────────
       setStep("render", "loading", "Descargando clips...");
       const ff = ffmpegRef.current!;
+      const fetchFile = fetchFileRef.current!;
 
       // Descargar audio
       await ff.writeFile("audio.mp3", await fetchFile(audioBlob));
