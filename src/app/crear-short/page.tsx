@@ -205,7 +205,8 @@ export default function CrearShortPage() {
         const res = await fetch("/api/guion", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tema, duracion, tipoCanal: "faceless", nicho: "general" }),
+          // La API espera "titulo" no "tema"; devuelve texto plano (no JSON/SSE)
+          body: JSON.stringify({ titulo: tema, duracion, nicho: "general", formato: "Short", faceless: true }),
         });
         if (!res.ok) throw new Error("Error generando guión");
         const reader = res.body!.getReader();
@@ -214,14 +215,10 @@ export default function CrearShortPage() {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value);
-          for (const line of chunk.split("\n")) {
-            if (line.startsWith("data: ")) {
-              try { const d = JSON.parse(line.slice(6)); if (d.text) full += d.text; } catch {}
-            }
-          }
+          full += decoder.decode(value, { stream: true });
         }
         scriptText = full.trim();
+        if (!scriptText) throw new Error("El guión volvió vacío. Inténtalo de nuevo.");
         setGuion(scriptText);
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
