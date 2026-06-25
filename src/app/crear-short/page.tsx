@@ -37,10 +37,21 @@ const DURACIONES = [
 /** Elimina todos los marcadores del guión antes de enviarlo a TTS */
 function cleanForTTS(text: string): string {
   return text
-    .replace(/\[[^\]]*\]/g, " ")          // [HOOK], [EMOCIÓN: ...], [VISUAL: ...], etc.
-    .replace(/━+[^\n]*/g, "")             // ━━━━ separadores de sección
-    .replace(/^─+.*$/gm, "")              // ─── separadores
-    .replace(/\s{2,}/g, " ")
+    // 1. Eliminar TODO lo que esté dentro de corchetes (incluso multilínea)
+    .replace(/\[[\s\S]*?\]/g, " ")
+    // 2. Eliminar líneas con caracteres de caja (━ ─ ═ etc.)
+    .replace(/^.*[─-╿].*$/gm, "")
+    // 3. Eliminar formato markdown **bold** *italic*
+    .replace(/\*+([^*\n]*)\*+/g, "$1")
+    .replace(/\*+/g, "")
+    // 4. Eliminar líneas en MAYÚSCULAS completas (etiquetas de sección)
+    .replace(/^[A-ZÁÉÍÓÚÜÑ\s\d:→\-–—\/]+$/gm, "")
+    // 5. Eliminar ": " al inicio de línea (residuo de [MARKER]: texto)
+    .replace(/^[\s]*:[\s]*/gm, "")
+    // 6. Eliminar viñetas y guiones de lista
+    .replace(/^[\s]*[-•·*]\s+/gm, "")
+    // 7. Limpiar espacios y saltos
+    .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -60,12 +71,12 @@ function buildSubtitles(text: string, duration: number) {
 
 /** Dibuja subtítulo estilo TikTok centrado en la parte baja del canvas */
 function drawSub(ctx: CanvasRenderingContext2D, text: string, W: number, H: number) {
-  const fontSize = 40;
-  ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+  const fontSize = 44;
+  ctx.font = `bold ${fontSize}px Arial Black, Arial, sans-serif`;
   ctx.textAlign = "center";
 
   // Word-wrap
-  const maxW = W - 80;
+  const maxW = W - 60;
   const words = text.split(" ");
   const lines: string[] = [];
   let cur = "";
@@ -75,29 +86,35 @@ function drawSub(ctx: CanvasRenderingContext2D, text: string, W: number, H: numb
     else cur = test;
   }
   if (cur) lines.push(cur);
+  if (!lines.length) return;
 
-  const lh = fontSize * 1.35;
+  const lh = fontSize * 1.3;
   const totalH = lines.length * lh;
-  const baseY = H - 120;
-  const pad = 18;
+  // Posición fija: 160px desde abajo
+  const startY = H - 160 - totalH;
+  const pad = 20;
 
-  // Background pill
+  // Fondo negro semitransparente
   const bgW = Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2;
-  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  ctx.fillStyle = "rgba(0,0,0,0.75)";
   ctx.beginPath();
   if (ctx.roundRect) {
-    ctx.roundRect((W - bgW) / 2, baseY - totalH - pad, bgW, totalH + pad * 2, 10);
+    ctx.roundRect((W - bgW) / 2, startY - pad, bgW, totalH + pad * 2, 12);
   } else {
-    ctx.rect((W - bgW) / 2, baseY - totalH - pad, bgW, totalH + pad * 2);
+    ctx.rect((W - bgW) / 2, startY - pad, bgW, totalH + pad * 2);
   }
   ctx.fill();
 
-  // Text
-  ctx.shadowColor = "rgba(0,0,0,0.9)";
-  ctx.shadowBlur = 6;
+  // Texto blanco con borde negro para máxima legibilidad
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
   ctx.fillStyle = "#ffffff";
+  ctx.shadowColor = "rgba(0,0,0,0.8)";
+  ctx.shadowBlur = 8;
   lines.forEach((line, i) => {
-    ctx.fillText(line, W / 2, baseY - totalH + i * lh + fontSize * 0.85);
+    const y = startY + i * lh + fontSize * 0.88;
+    ctx.strokeText(line, W / 2, y);
+    ctx.fillText(line, W / 2, y);
   });
   ctx.shadowBlur = 0;
 }
