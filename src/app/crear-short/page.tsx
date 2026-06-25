@@ -5,12 +5,12 @@ import GlobalNav from "@/components/GlobalNav";
 import {
   Video, Download, Loader2, Play, Pause,
   Sparkles, ChevronRight, CheckCircle, AlertCircle,
-  Zap, Film, Music, Image,
+  Zap, Film, Music,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface PexelsPhoto { id: number; url: string; thumb: string; }
+interface PexelsVideo { id: number; url: string; thumb: string; duration: number; }
 
 interface Step {
   id: string;
@@ -32,39 +32,108 @@ const DURACIONES = [
   { val: "60 seg", label: "60 seg" },
 ];
 
-// ─── Canvas + MediaRecorder renderer ─────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function loadImage(proxyUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`No se pudo cargar: ${proxyUrl}`));
-    img.src = proxyUrl;
-  });
+/** Elimina todos los marcadores del guión antes de enviarlo a TTS */
+function cleanForTTS(text: string): string {
+  return text
+    .replace(/\[[^\]]*\]/g, " ")          // [HOOK], [EMOCIÓN: ...], [VISUAL: ...], etc.
+    .replace(/━+[^\n]*/g, "")             // ━━━━ separadores de sección
+    .replace(/^─+.*$/gm, "")              // ─── separadores
+    .replace(/\s{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
+/** Divide el texto limpio en chunks de ~6 palabras para subtítulos */
+function buildSubtitles(text: string, duration: number) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const CHUNK = 6;
+  const chunks: string[] = [];
+  for (let i = 0; i < words.length; i += CHUNK) {
+    chunks.push(words.slice(i, i + CHUNK).join(" "));
+  }
+  if (!chunks.length) return [];
+  const dt = duration / chunks.length;
+  return chunks.map((t, i) => ({ text: t, start: i * dt, end: (i + 1) * dt }));
+}
+
+/** Dibuja subtítulo estilo TikTok centrado en la parte baja del canvas */
+function drawSub(ctx: CanvasRenderingContext2D, text: string, W: number, H: number) {
+  const fontSize = 40;
+  ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+  ctx.textAlign = "center";
+
+  // Word-wrap
+  const maxW = W - 80;
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  }
+  if (cur) lines.push(cur);
+
+  const lh = fontSize * 1.35;
+  const totalH = lines.length * lh;
+  const baseY = H - 120;
+  const pad = 18;
+
+  // Background pill
+  const bgW = Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2;
+  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect((W - bgW) / 2, baseY - totalH - pad, bgW, totalH + pad * 2, 10);
+  } else {
+    ctx.rect((W - bgW) / 2, baseY - totalH - pad, bgW, totalH + pad * 2);
+  }
+  ctx.fill();
+
+  // Text
+  ctx.shadowColor = "rgba(0,0,0,0.9)";
+  ctx.shadowBlur = 6;
+  ctx.fillStyle = "#ffffff";
+  lines.forEach((line, i) => {
+    ctx.fillText(line, W / 2, baseY - totalH + i * lh + fontSize * 0.85);
+  });
+  ctx.shadowBlur = 0;
+}
+
+// ─── Renderer ─────────────────────────────────────────────────────────────────
+
 async function renderShort(
-  photos: PexelsPhoto[],
+  videoUrl: string,
   audioBlob: Blob,
+  cleanScript: string,
   onProgress: (msg: string) => void,
 ): Promise<string> {
   if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
 
-  // ── Cargar imágenes ──────────────────────────────────────────────────────
-  onProgress("Cargando imágenes...");
-  const images = await Promise.all(
-    photos.map(p =>
-      loadImage(`/api/download-image?url=${encodeURIComponent(p.url)}&filename=bg.jpg`)
-    )
-  );
+  // ── Cargar video de fondo ────────────────────────────────────────────────
+  onProgress("Cargando video de fondo...");
+  const bgVideo = document.createElement("video");
+  bgVideo.crossOrigin = "anonymous";
+  bgVideo.muted = true;
+  bgVideo.loop = true;
+  bgVideo.playsInline = true;
+  bgVideo.src = `/api/proxy-video?url=${encodeURIComponent(videoUrl)}`;
+  await new Promise<void>((res, rej) => {
+    bgVideo.oncanplay = () => res();
+    bgVideo.onerror = () => rej(new Error("Error cargando video de fondo"));
+    setTimeout(() => rej(new Error("Timeout cargando video (>20s)")), 20000);
+  });
+  bgVideo.play();
 
   // ── Decodificar audio ────────────────────────────────────────────────────
   onProgress("Procesando audio...");
   const audioCtx = new AudioContext();
-  const arrayBuffer = await audioBlob.arrayBuffer();
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  const audioBuffer = await audioCtx.decodeAudioData(await audioBlob.arrayBuffer());
   const duration = audioBuffer.duration;
+
+  const subtitles = buildSubtitles(cleanScript, duration);
 
   // ── Canvas 9:16 ──────────────────────────────────────────────────────────
   const W = 608, H = 1080;
@@ -72,7 +141,7 @@ async function renderShort(
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d")!;
 
-  // ── Routing de audio → MediaStream ──────────────────────────────────────
+  // ── Audio routing ────────────────────────────────────────────────────────
   const dest = audioCtx.createMediaStreamDestination();
   const src  = audioCtx.createBufferSource();
   src.buffer = audioBuffer;
@@ -84,8 +153,6 @@ async function renderShort(
   // ── MediaRecorder ────────────────────────────────────────────────────────
   const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
     ? "video/webm;codecs=vp9,opus"
-    : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-    ? "video/webm;codecs=vp8,opus"
     : "video/webm";
 
   const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 3_000_000 });
@@ -94,66 +161,46 @@ async function renderShort(
 
   return new Promise((resolve, reject) => {
     recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: mimeType });
-      resolve(URL.createObjectURL(blob));
+      bgVideo.pause();
+      audioCtx.close();
+      resolve(URL.createObjectURL(new Blob(chunks, { type: mimeType })));
     };
-    recorder.onerror = e => reject(e);
+    recorder.onerror = reject;
 
     recorder.start(200);
     src.start(0);
+    onProgress("Grabando...");
 
-    const startTs   = performance.now();
-    const imgSlot   = duration / images.length; // segundos por imagen
+    const startTs = performance.now();
 
     function drawFrame() {
       const elapsed = (performance.now() - startTs) / 1000;
+      if (elapsed >= duration + 0.5) { recorder.stop(); return; }
 
-      // Parar cuando termine el audio (+0.3s margen)
-      if (elapsed >= duration + 0.3) {
-        recorder.stop();
-        audioCtx.close();
-        return;
-      }
+      // Video de fondo con cover + ligero zoom progresivo
+      const progress = elapsed / duration;
+      const scale    = 1 + progress * 0.06;
+      const vW = bgVideo.videoWidth  || W;
+      const vH = bgVideo.videoHeight || H;
+      const ratio = Math.max(W / vW, H / vH) * scale;
+      const dw = vW * ratio;
+      const dh = vH * ratio;
+      ctx.drawImage(bgVideo, (W - dw) / 2, (H - dh) / 2, dw, dh);
 
-      const imgIdx  = Math.min(Math.floor(elapsed / imgSlot), images.length - 1);
-      const imgProg = (elapsed % imgSlot) / imgSlot; // 0–1 dentro de esta imagen
-      const img     = images[imgIdx];
-
-      // Ken Burns: zoom suave desde 1× a 1.08×
-      const scale  = 1 + imgProg * 0.08;
-      // Encuadrar para cubrir todo el canvas (cover)
-      const ratio  = Math.max(W / img.naturalWidth, H / img.naturalHeight) * scale;
-      const dw     = img.naturalWidth  * ratio;
-      const dh     = img.naturalHeight * ratio;
-      const dx     = (W - dw) / 2;
-      const dy     = (H - dh) / 2;
-
-      ctx.clearRect(0, 0, W, H);
-      ctx.drawImage(img, dx, dy, dw, dh);
-
-      // Fade suave a la siguiente imagen (último 15% de cada slot)
-      if (imgProg > 0.85 && imgIdx + 1 < images.length) {
-        const alpha  = (imgProg - 0.85) / 0.15;
-        const next   = images[imgIdx + 1];
-        const nRatio = Math.max(W / next.naturalWidth, H / next.naturalHeight);
-        const nw     = next.naturalWidth  * nRatio;
-        const nh     = next.naturalHeight * nRatio;
-        ctx.globalAlpha = alpha;
-        ctx.drawImage(next, (W - nw) / 2, (H - nh) / 2, nw, nh);
-        ctx.globalAlpha = 1;
-      }
-
-      // Overlay semitransparente abajo (estilo subtítulo)
-      const grad = ctx.createLinearGradient(0, H * 0.65, 0, H);
+      // Vignette / gradiente inferior
+      const grad = ctx.createLinearGradient(0, H * 0.55, 0, H);
       grad.addColorStop(0, "rgba(0,0,0,0)");
-      grad.addColorStop(1, "rgba(0,0,0,0.65)");
+      grad.addColorStop(1, "rgba(0,0,0,0.6)");
       ctx.fillStyle = grad;
-      ctx.fillRect(0, H * 0.65, W, H * 0.35);
+      ctx.fillRect(0, H * 0.55, W, H * 0.45);
+
+      // Subtítulo activo
+      const sub = subtitles.find(s => elapsed >= s.start && elapsed < s.end);
+      if (sub) drawSub(ctx, sub.text, W, H);
 
       requestAnimationFrame(drawFrame);
     }
 
-    onProgress("Grabando...");
     drawFrame();
   });
 }
@@ -168,17 +215,15 @@ export default function CrearShortPage() {
   const [guion, setGuion]       = useState("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [videoMime, setVideoMime] = useState("video/webm");
   const [steps, setSteps] = useState<Step[]>([
-    { id: "script", label: "Generando guión",           status: "idle" },
-    { id: "photos", label: "Buscando imágenes Pexels",  status: "idle" },
+    { id: "script", label: "Generando guión",            status: "idle" },
+    { id: "videos", label: "Buscando video de fondo",    status: "idle" },
     { id: "audio",  label: "Generando voz (ElevenLabs)", status: "idle" },
-    { id: "render", label: "Montando video",             status: "idle" },
+    { id: "render", label: "Montando video",              status: "idle" },
   ]);
-  const videoRef   = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
 
-  // Leer guión/tema desde query params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const g = params.get("guion");
@@ -223,35 +268,36 @@ export default function CrearShortPage() {
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
 
-      // ── 2. Fotos Pexels ───────────────────────────────────────────────────
-      setStep("photos", "loading");
-      const keywords = tema || scriptText.slice(0, 50);
-      const q = keywords.split(/\s+/).slice(0, 3).join(" ");
-      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(q)}&n=5&type=photo`);
-      if (!pvRes.ok) throw new Error("Error buscando imágenes en Pexels");
-      const { photos }: { photos: PexelsPhoto[] } = await pvRes.json();
-      if (!photos?.length) throw new Error("No se encontraron imágenes para este tema");
-      setStep("photos", "done", `${photos.length} imágenes encontradas`);
+      // ── 2. Video Pexels ───────────────────────────────────────────────────
+      setStep("videos", "loading");
+      const q = (tema || scriptText.slice(0, 50)).split(/\s+/).slice(0, 3).join(" ");
+      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(q)}&n=5`);
+      if (!pvRes.ok) throw new Error("Error buscando video en Pexels");
+      const { videos }: { videos: PexelsVideo[] } = await pvRes.json();
+      if (!videos?.length) throw new Error("No se encontró video para este tema");
+      setStep("videos", "done", `${videos.length} clips encontrados`);
 
-      // ── 3. TTS ───────────────────────────────────────────────────────────
+      // ── 3. TTS (sin marcadores) ───────────────────────────────────────────
       setStep("audio", "loading");
+      const cleanScript = cleanForTTS(scriptText);
       const ttsRes = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: scriptText, voiceId }),
+        body: JSON.stringify({ texto: cleanScript, voiceId }),
       });
       if (!ttsRes.ok) throw new Error("Error generando voz");
       const audioBlob = await ttsRes.blob();
       if (audioBlob.size < 500) throw new Error(`Audio vacío (${audioBlob.size} bytes)`);
       setStep("audio", "done");
 
-      // ── 4. Render Canvas + MediaRecorder ──────────────────────────────────
+      // ── 4. Render ─────────────────────────────────────────────────────────
       setStep("render", "loading", "Iniciando...");
-      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-        ? "video/webm" : "video/webm";
-      setVideoMime(mime);
-
-      const url = await renderShort(photos, audioBlob, msg => setStep("render", "loading", msg));
+      const url = await renderShort(
+        videos[0].url,
+        audioBlob,
+        cleanScript,
+        msg => setStep("render", "loading", msg),
+      );
       setVideoUrl(url);
       setStep("render", "done", "¡Video listo!");
 
@@ -268,8 +314,7 @@ export default function CrearShortPage() {
     if (!videoUrl) return;
     const a = document.createElement("a");
     a.href = videoUrl;
-    const ext = videoMime.includes("mp4") ? "mp4" : "webm";
-    a.download = `short-${(tema.slice(0, 30) || "viralscope").replace(/\s+/g, "-")}.${ext}`;
+    a.download = `short-${(tema.slice(0, 30) || "viralscope").replace(/\s+/g, "-")}.webm`;
     a.click();
   }
 
@@ -286,23 +331,18 @@ export default function CrearShortPage() {
       <GlobalNav />
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
-        {/* Header */}
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2">
             <Video size={28} style={{ color: "#a78bfa" }} />
             <h1 className="text-3xl font-bold text-white">Crear Short con IA</h1>
           </div>
           <p className="text-slate-400 text-sm">
-            Guión → Voz → Imágenes Pexels → Video listo para TikTok / Reels / Shorts
+            Guión → Voz → Video Pexels + Subtítulos → Listo para TikTok / Reels / Shorts
           </p>
-          <div className="flex items-center justify-center gap-1 text-green-400 text-xs">
-            <CheckCircle size={12} /> Sin descargas — procesamiento nativo en tu navegador
-          </div>
         </div>
 
         {/* Config */}
         <div className="rounded-2xl p-5 space-y-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(139,92,246,0.2)" }}>
-
           {guionExt && (
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Guión importado</label>
@@ -316,13 +356,10 @@ export default function CrearShortPage() {
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
               {guionExt ? "O escribe un tema nuevo" : "Tema del Short *"}
             </label>
-            <input
-              value={tema}
-              onChange={e => setTema(e.target.value)}
+            <input value={tema} onChange={e => setTema(e.target.value)}
               placeholder="Ej: 3 tips para ahorrar dinero este mes"
               className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}
-            />
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(139,92,246,0.2)" }} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -342,7 +379,6 @@ export default function CrearShortPage() {
                 ))}
               </div>
             </div>
-
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Voz</label>
               <select value={voiceId} onChange={e => setVoiceId(e.target.value)}
@@ -357,8 +393,7 @@ export default function CrearShortPage() {
             className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all"
             style={{
               background: canGenerate ? "linear-gradient(135deg, #7c3aed, #a855f7)" : "rgba(255,255,255,0.05)",
-              opacity: canGenerate ? 1 : 0.5,
-              cursor: canGenerate ? "pointer" : "not-allowed",
+              opacity: canGenerate ? 1 : 0.5, cursor: canGenerate ? "pointer" : "not-allowed",
             }}>
             {isRunning ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
             {isRunning ? "Generando..." : "Crear Short"}
@@ -392,7 +427,7 @@ export default function CrearShortPage() {
           </div>
         )}
 
-        {/* Video result */}
+        {/* Result */}
         {videoUrl && (
           <div className="rounded-2xl p-5 space-y-4" style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
             <div className="flex items-center justify-between">
@@ -403,14 +438,12 @@ export default function CrearShortPage() {
               <button onClick={handleDownload}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-white text-sm"
                 style={{ background: "linear-gradient(135deg, #1d4ed8, #3b82f6)" }}>
-                <Download size={15} /> Descargar
+                <Download size={15} /> Descargar WebM
               </button>
             </div>
-
             <div className="relative rounded-xl overflow-hidden mx-auto" style={{ maxWidth: 320, background: "#000" }}>
               <video ref={videoRef} src={videoUrl} className="w-full" playsInline onEnded={() => setPlaying(false)} />
-              <button onClick={togglePlay}
-                className="absolute inset-0 flex items-center justify-center"
+              <button onClick={togglePlay} className="absolute inset-0 flex items-center justify-center"
                 style={{ background: playing ? "transparent" : "rgba(0,0,0,0.4)" }}>
                 {!playing && (
                   <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: "rgba(139,92,246,0.8)" }}>
@@ -419,36 +452,29 @@ export default function CrearShortPage() {
                 )}
               </button>
             </div>
-
             <div className="grid grid-cols-3 gap-2 text-center">
               {[{ icon: Film, label: "TikTok" }, { icon: Video, label: "Reels" }, { icon: Zap, label: "Shorts" }].map(({ icon: Icon, label }) => (
                 <div key={label} className="rounded-xl py-2 text-xs text-slate-400" style={{ background: "rgba(255,255,255,0.04)" }}>
-                  <Icon size={16} style={{ color: "#a78bfa" }} className="mx-auto mb-1" />
-                  {label}
+                  <Icon size={16} style={{ color: "#a78bfa" }} className="mx-auto mb-1" />{label}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Guión generado */}
         {guion && !guionExt && (
           <div className="rounded-2xl p-4 space-y-2" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
             <div className="flex items-center gap-2">
               <Music size={14} style={{ color: "#a78bfa" }} />
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Guión generado</span>
             </div>
-            <pre className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed" style={{ maxHeight: 200, overflowY: "auto" }}>
-              {guion}
-            </pre>
+            <pre className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed" style={{ maxHeight: 200, overflowY: "auto" }}>{guion}</pre>
           </div>
         )}
 
         <div className="text-center text-xs text-slate-600 pb-4">
-          Procesamiento nativo — sin descargas pesadas.
-          <br />Imágenes: <a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="underline">Pexels</a> · Voz: ElevenLabs · Motor: Canvas + MediaRecorder
+          Video: <a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="underline">Pexels</a> · Voz: ElevenLabs · Motor: Canvas + MediaRecorder
         </div>
-
       </div>
     </div>
   );
