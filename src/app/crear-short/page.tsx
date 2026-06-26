@@ -260,27 +260,23 @@ export default function CrearShortPage() {
     setSteps(prev => prev.map(s => ({ ...s, status: "idle", detail: undefined })));
 
     try {
-      // ── 1. Guión ──────────────────────────────────────────────────────────
+      // ── 1. Voiceover limpio (sin marcadores de producción) ────────────────
       let scriptText = guion.trim();
+      // Si viene un guión importado con marcadores, limpiarlo también
+      if (scriptText) scriptText = cleanForTTS(scriptText);
+
       if (!scriptText) {
         setStep("script", "loading");
-        const res = await fetch("/api/guion", {
+        // Usamos /api/voiceover que genera texto narrable puro, sin etiquetas
+        const res = await fetch("/api/voiceover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // La API espera "titulo" no "tema"; devuelve texto plano (no JSON/SSE)
-          body: JSON.stringify({ titulo: tema, duracion, nicho: "general", formato: "Short", faceless: true }),
+          body: JSON.stringify({ tema, duracion }),
         });
-        if (!res.ok) throw new Error("Error generando guión");
-        const reader = res.body!.getReader();
-        const decoder = new TextDecoder();
-        let full = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          full += decoder.decode(value, { stream: true });
-        }
-        scriptText = full.trim();
-        if (!scriptText) throw new Error("El guión volvió vacío. Inténtalo de nuevo.");
+        if (!res.ok) throw new Error("Error generando voiceover");
+        const { voiceover } = await res.json();
+        if (!voiceover) throw new Error("El voiceover volvió vacío. Inténtalo de nuevo.");
+        scriptText = voiceover;
         setGuion(scriptText);
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
@@ -296,11 +292,11 @@ export default function CrearShortPage() {
 
       // ── 3. TTS (sin marcadores) ───────────────────────────────────────────
       setStep("audio", "loading");
-      const cleanScript = cleanForTTS(scriptText);
+      // scriptText ya es texto puro — enviarlo directo a TTS
       const ttsRes = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: cleanScript, voiceId }),
+        body: JSON.stringify({ texto: scriptText, voiceId }),
       });
       if (!ttsRes.ok) throw new Error("Error generando voz");
       const audioBlob = await ttsRes.blob();
@@ -312,7 +308,7 @@ export default function CrearShortPage() {
       const url = await renderShort(
         videos[0].url,
         audioBlob,
-        cleanScript,
+        scriptText,
         msg => setStep("render", "loading", msg),
       );
       setVideoUrl(url);
