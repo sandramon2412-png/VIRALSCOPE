@@ -122,33 +122,32 @@ function drawSub(ctx: CanvasRenderingContext2D, text: string, W: number, H: numb
 // ─── Renderer ─────────────────────────────────────────────────────────────────
 
 async function renderShort(
-  videoUrl: string,
+  photos: { url: string }[],
   audioBlob: Blob,
   cleanScript: string,
   onProgress: (msg: string) => void,
 ): Promise<string> {
   if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
 
-  // ── Cargar video de fondo ────────────────────────────────────────────────
-  onProgress("Cargando video de fondo...");
-  const bgVideo = document.createElement("video");
-  bgVideo.crossOrigin = "anonymous";
-  bgVideo.muted = true;
-  bgVideo.loop = true;
-  bgVideo.playsInline = true;
-  bgVideo.src = `/api/proxy-video?url=${encodeURIComponent(videoUrl)}`;
-  await new Promise<void>((res, rej) => {
-    bgVideo.oncanplay = () => res();
-    bgVideo.onerror = () => rej(new Error("Error cargando video de fondo"));
-    setTimeout(() => rej(new Error("Timeout cargando video (>20s)")), 20000);
-  });
-  bgVideo.play();
+  // ── Cargar imágenes ──────────────────────────────────────────────────────
+  onProgress("Cargando imágenes...");
+  const images = await Promise.all(
+    photos.slice(0, 5).map(p =>
+      loadImage(`/api/download-image?url=${encodeURIComponent(p.url)}&filename=bg.jpg`)
+    )
+  );
 
-  // ── Decodificar audio ────────────────────────────────────────────────────
+  // ── Audio con <audio> element — más confiable que decodeAudioData ─────────
   onProgress("Procesando audio...");
-  const audioCtx = new AudioContext();
-  const audioBuffer = await audioCtx.decodeAudioData(await audioBlob.arrayBuffer());
-  const duration = audioBuffer.duration;
+  const audioUrl = URL.createObjectURL(audioBlob);
+  const audioEl  = new Audio(audioUrl);
+
+  const duration = await new Promise<number>((res, rej) => {
+    audioEl.onloadedmetadata = () => res(audioEl.duration);
+    audioEl.onerror = () => rej(new Error("No se pudo cargar el audio"));
+    setTimeout(() => rej(new Error("Timeout leyendo duración del audio")), 8000);
+    audioEl.load();
+  });
 
   const subtitles = buildSubtitles(cleanScript, duration);
 
@@ -158,19 +157,19 @@ async function renderShort(
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d")!;
 
-  // ── Audio routing ────────────────────────────────────────────────────────
-  const dest = audioCtx.createMediaStreamDestination();
-  const src  = audioCtx.createBufferSource();
-  src.buffer = audioBuffer;
-  src.connect(dest);
+  // ── Routing audio → MediaStream ──────────────────────────────────────────
+  const audioCtx = new AudioContext();
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+  const audioSrc = audioCtx.createMediaElementSource(audioEl);
+  const dest     = audioCtx.createMediaStreamDestination();
+  audioSrc.connect(dest);
 
   const canvasStream = canvas.captureStream(30);
   dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
 
   // ── MediaRecorder ────────────────────────────────────────────────────────
   const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-    ? "video/webm;codecs=vp9,opus"
-    : "video/webm";
+    ? "video/webm;codecs=vp9,opus" : "video/webm";
 
   const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 3_000_000 });
   const chunks: Blob[] = [];
@@ -178,38 +177,51 @@ async function renderShort(
 
   return new Promise((resolve, reject) => {
     recorder.onstop = () => {
-      bgVideo.pause();
       audioCtx.close();
+      URL.revokeObjectURL(audioUrl);
       resolve(URL.createObjectURL(new Blob(chunks, { type: mimeType })));
     };
     recorder.onerror = reject;
 
     recorder.start(200);
-    src.start(0);
+    audioEl.play().catch(console.error);
     onProgress("Grabando...");
 
-    const startTs = performance.now();
+    const startTs  = performance.now();
+    const imgSlot  = duration / images.length; // segundos por imagen
 
     function drawFrame() {
       const elapsed = (performance.now() - startTs) / 1000;
-      if (elapsed >= duration + 0.5) { recorder.stop(); return; }
+      if (elapsed >= duration + 0.4) { recorder.stop(); return; }
 
-      // Video de fondo con cover + ligero zoom progresivo
-      const progress = elapsed / duration;
-      const scale    = 1 + progress * 0.06;
-      const vW = bgVideo.videoWidth  || W;
-      const vH = bgVideo.videoHeight || H;
-      const ratio = Math.max(W / vW, H / vH) * scale;
-      const dw = vW * ratio;
-      const dh = vH * ratio;
-      ctx.drawImage(bgVideo, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      // Imagen actual + Ken Burns dramático (zoom 1×→1.15×) + pan alternado
+      const imgIdx  = Math.min(Math.floor(elapsed / imgSlot), images.length - 1);
+      const imgProg = (elapsed % imgSlot) / imgSlot; // 0–1 dentro de este slot
+      const img     = images[imgIdx];
 
-      // Vignette / gradiente inferior
-      const grad = ctx.createLinearGradient(0, H * 0.55, 0, H);
+      const zoom  = 1 + imgProg * 0.15;
+      const panX  = (imgIdx % 2 === 0 ? 1 : -1) * imgProg * 0.03 * W;
+      const ratio = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+      const dw    = img.naturalWidth  * ratio;
+      const dh    = img.naturalHeight * ratio;
+      ctx.drawImage(img, (W - dw) / 2 + panX, (H - dh) / 2, dw, dh);
+
+      // Fade suave a la siguiente imagen (último 20% del slot)
+      if (imgProg > 0.8 && imgIdx + 1 < images.length) {
+        const alpha = (imgProg - 0.8) / 0.2;
+        const next  = images[imgIdx + 1];
+        const nr    = Math.max(W / next.naturalWidth, H / next.naturalHeight);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(next, (W - next.naturalWidth * nr) / 2, (H - next.naturalHeight * nr) / 2, next.naturalWidth * nr, next.naturalHeight * nr);
+        ctx.globalAlpha = 1;
+      }
+
+      // Gradiente inferior
+      const grad = ctx.createLinearGradient(0, H * 0.5, 0, H);
       grad.addColorStop(0, "rgba(0,0,0,0)");
-      grad.addColorStop(1, "rgba(0,0,0,0.6)");
+      grad.addColorStop(1, "rgba(0,0,0,0.65)");
       ctx.fillStyle = grad;
-      ctx.fillRect(0, H * 0.55, W, H * 0.45);
+      ctx.fillRect(0, H * 0.5, W, H * 0.5);
 
       // Subtítulo activo
       const sub = subtitles.find(s => elapsed >= s.start && elapsed < s.end);
@@ -281,14 +293,14 @@ export default function CrearShortPage() {
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
 
-      // ── 2. Video Pexels ───────────────────────────────────────────────────
+      // ── 2. Fotos Pexels (portrait, para Ken Burns animado) ───────────────
       setStep("videos", "loading");
       const q = (tema || scriptText.slice(0, 50)).split(/\s+/).slice(0, 3).join(" ");
-      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(q)}&n=5`);
-      if (!pvRes.ok) throw new Error("Error buscando video en Pexels");
-      const { videos }: { videos: PexelsVideo[] } = await pvRes.json();
-      if (!videos?.length) throw new Error("No se encontró video para este tema");
-      setStep("videos", "done", `${videos.length} clips encontrados`);
+      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(q)}&n=5&type=photo`);
+      if (!pvRes.ok) throw new Error("Error buscando imágenes en Pexels");
+      const { photos }: { photos: { id: number; url: string; thumb: string }[] } = await pvRes.json();
+      if (!photos?.length) throw new Error("No se encontraron imágenes para este tema");
+      setStep("videos", "done", `${photos.length} imágenes encontradas`);
 
       // ── 3. TTS (sin marcadores) ───────────────────────────────────────────
       setStep("audio", "loading");
@@ -306,7 +318,7 @@ export default function CrearShortPage() {
       // ── 4. Render ─────────────────────────────────────────────────────────
       setStep("render", "loading", "Iniciando...");
       const url = await renderShort(
-        videos[0].url,
+        photos,
         audioBlob,
         scriptText,
         msg => setStep("render", "loading", msg),
