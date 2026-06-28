@@ -129,25 +129,39 @@ async function renderShort(
 ): Promise<string> {
   if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
 
-  // ── 1. Cargar todas las imágenes EN PARALELO como Blob URLs ───────────────
-  //    (blob URL = mismo origen → canvas no queda tainted)
+  // ── 1. Cargar imágenes en paralelo ────────────────────────────────────────
+  //    Intento 1: directo desde Pexels CDN (tienen CORS, más rápido)
+  //    Intento 2: vía proxy como blob URL (fallback, siempre funciona con canvas)
   onProgress("Cargando imágenes...");
+
+  async function loadForCanvas(url: string): Promise<HTMLImageElement> {
+    // Intento directo (Pexels CDN tiene Access-Control-Allow-Origin: *)
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      const t = setTimeout(() => reject(new Error("timeout-direct")), 10000);
+      img.onload = () => { clearTimeout(t); resolve(img); };
+      img.onerror = () => {
+        clearTimeout(t);
+        // Fallback: proxy → blob URL (nunca tacha el canvas)
+        fetch(`/api/download-image?url=${encodeURIComponent(url)}&filename=bg.jpg`)
+          .then(r => r.ok ? r.blob() : Promise.reject(`proxy ${r.status}`))
+          .then(blob => {
+            const blobUrl = URL.createObjectURL(blob);
+            const img2 = new Image();
+            const t2 = setTimeout(() => reject(new Error("timeout-proxy")), 10000);
+            img2.onload = () => { clearTimeout(t2); resolve(img2); };
+            img2.onerror = () => { clearTimeout(t2); reject(new Error("proxy-decode")); };
+            img2.src = blobUrl;
+          })
+          .catch(reject);
+      };
+      img.src = url;
+    });
+  }
+
   const imgResults = await Promise.allSettled(
-    photos.slice(0, 5).map(async p => {
-      const res = await fetch(
-        `/api/download-image?url=${encodeURIComponent(p.url)}&filename=bg.jpg`
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        const t = setTimeout(() => reject(new Error("Timeout imagen")), 10000);
-        img.onload = () => { clearTimeout(t); resolve(img); };
-        img.onerror = () => { clearTimeout(t); reject(new Error("Error decodificando")); };
-        img.src = blobUrl;
-      });
-    })
+    photos.slice(0, 5).map(p => loadForCanvas(p.url))
   );
 
   const images = imgResults
@@ -336,14 +350,46 @@ export default function CrearShortPage() {
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
 
-      // ── 2. Fotos Pexels (portrait, para Ken Burns animado) ───────────────
+      // ── 2. Fotos Pexels — búsquedas con palabras clave DISTINTAS ────────────
+      //    (1 búsqueda por keyword = imágenes de distintos temas visuales)
       setStep("videos", "loading");
-      const q = (tema || scriptText.slice(0, 50)).split(/\s+/).slice(0, 3).join(" ");
-      const pvRes = await fetch(`/api/pexels?q=${encodeURIComponent(q)}&n=5&type=photo`);
-      if (!pvRes.ok) throw new Error("Error buscando imágenes en Pexels");
-      const { photos }: { photos: { id: number; url: string; thumb: string }[] } = await pvRes.json();
-      if (!photos?.length) throw new Error("No se encontraron imágenes para este tema");
-      setStep("videos", "done", `${photos.length} imágenes encontradas`);
+
+      const STOP = new Set(["para","como","este","esta","con","por","que","los","las","del","una","el","la","de","en","y","a","se","su","es","un","lo","nos","tu","mi","sus","les","hay","muy","más","sin","ya","si","no"]);
+      const palabras = (tema || scriptText)
+        .toLowerCase()
+        .normalize("NFD").replace(/\p{Diacritic}/gu, "")   // quitar tildes
+        .replace(/[^a-z0-9\s]/g, "")
+        .split(/\s+/)
+        .filter(w => w.length > 3 && !STOP.has(w));
+
+      // 5 términos distintos: primero el tema completo (2-3 palabras), luego palabras individuales
+      const terms: string[] = [
+        (tema || scriptText.slice(0, 40)).split(/\s+/).slice(0, 3).join(" "),
+        ...palabras,
+      ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 5);
+      // rellenar si hay menos de 5
+      const fallbacks = ["lifestyle","motivation","success","nature","city"];
+      while (terms.length < 5) terms.push(fallbacks[terms.length - 1] || "motivation");
+
+      // Buscar 1 foto por término en paralelo — máxima diversidad visual
+      const photoResults = await Promise.allSettled(
+        terms.map(term =>
+          fetch(`/api/pexels?q=${encodeURIComponent(term)}&n=3&type=photo`)
+            .then(r => r.ok ? r.json() : Promise.reject(`Pexels ${r.status}`))
+            .then((data: { photos?: { id: number; url: string; thumb: string }[] }) =>
+              data.photos?.[0] ?? null
+            )
+        )
+      );
+
+      const photos = photoResults
+        .filter((r): r is PromiseFulfilledResult<{ id: number; url: string; thumb: string }> =>
+          r.status === "fulfilled" && r.value !== null
+        )
+        .map(r => r.value);
+
+      if (!photos.length) throw new Error("No se encontraron imágenes para este tema");
+      setStep("videos", "done", `${photos.length} imágenes (temas variados)`);
 
       // ── 3. TTS (sin marcadores) ───────────────────────────────────────────
       setStep("audio", "loading");

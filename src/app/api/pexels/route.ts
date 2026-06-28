@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 
     const photos = data.photos.map(p => ({
       id: p.id,
-      url: p.src.large2x || p.src.large || p.src.medium,
+      url: p.src.large || p.src.medium,  // evitar large2x (3-5MB); large=940px es suficiente
       thumb: p.src.medium,
     })).filter(p => p.url);
 
