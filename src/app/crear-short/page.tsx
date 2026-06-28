@@ -119,18 +119,6 @@ function drawSub(ctx: CanvasRenderingContext2D, text: string, W: number, H: numb
   ctx.shadowBlur = 0;
 }
 
-// ─── Helpers de carga ────────────────────────────────────────────────────────
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`No se pudo cargar: ${url}`));
-    img.src = url;
-  });
-}
-
 // ─── Renderer ─────────────────────────────────────────────────────────────────
 
 async function renderShort(
@@ -141,23 +129,35 @@ async function renderShort(
 ): Promise<string> {
   if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
 
-  // ── 1. Cargar imágenes vía proxy (sin CORS) ──────────────────────────────
+  // ── 1. Cargar todas las imágenes EN PARALELO como Blob URLs ───────────────
+  //    (blob URL = mismo origen → canvas no queda tainted)
   onProgress("Cargando imágenes...");
-  const images: HTMLImageElement[] = [];
-  for (const p of photos.slice(0, 5)) {
-    try {
-      const img = await loadImage(
+  const imgResults = await Promise.allSettled(
+    photos.slice(0, 5).map(async p => {
+      const res = await fetch(
         `/api/download-image?url=${encodeURIComponent(p.url)}&filename=bg.jpg`
       );
-      images.push(img);
-    } catch (e) {
-      console.warn("Imagen omitida:", e);
-    }
-  }
-  if (images.length === 0) throw new Error("No se pudieron cargar las imágenes de fondo");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        const t = setTimeout(() => reject(new Error("Timeout imagen")), 10000);
+        img.onload = () => { clearTimeout(t); resolve(img); };
+        img.onerror = () => { clearTimeout(t); reject(new Error("Error decodificando")); };
+        img.src = blobUrl;
+      });
+    })
+  );
 
-  // ── 2. Decodificar audio con AudioContext ─────────────────────────────────
-  onProgress("Procesando audio...");
+  const images = imgResults
+    .filter((r): r is PromiseFulfilledResult<HTMLImageElement> => r.status === "fulfilled")
+    .map(r => r.value);
+
+  if (images.length === 0) throw new Error("No se pudieron cargar imágenes de fondo");
+  onProgress(`${images.length} imágenes listas`);
+
+  // ── 2. Decodificar audio ───────────────────────────────────────────────────
   const audioCtx = new AudioContext();
   if (audioCtx.state === "suspended") await audioCtx.resume();
 
@@ -166,6 +166,7 @@ async function renderShort(
   const duration    = audioBuffer.duration;
 
   if (duration < 0.5) throw new Error("Audio demasiado corto, inténtalo de nuevo");
+  onProgress(`Audio listo: ${Math.round(duration)}s · ${images.length} imágenes`);
 
   const subtitles = buildSubtitles(cleanScript, duration);
 
@@ -175,14 +176,14 @@ async function renderShort(
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d")!;
 
-  // ── 4. Audio → MediaStream (BufferSource, no HTMLAudioElement) ────────────
+  // ── 4. Audio → MediaStream (AudioBufferSourceNode) ────────────────────────
   const dest      = audioCtx.createMediaStreamDestination();
   const audioBuf  = audioCtx.createBufferSource();
   audioBuf.buffer = audioBuffer;
   audioBuf.connect(dest);
-  audioBuf.connect(audioCtx.destination); // reproducir también por altavoces
+  audioBuf.connect(audioCtx.destination); // también por altavoces durante la grabación
 
-  // ── 5. Combinar canvas + audio en un MediaStream ──────────────────────────
+  // ── 5. Combinar canvas + audio ────────────────────────────────────────────
   const canvasStream = canvas.captureStream(30);
   dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
 
@@ -201,24 +202,24 @@ async function renderShort(
       audioCtx.close();
       resolve(URL.createObjectURL(new Blob(chunks, { type: mimeType })));
     };
-    recorder.onerror = (ev) => reject(new Error("MediaRecorder error: " + ev));
+    recorder.onerror = () => reject(new Error("Error en MediaRecorder"));
 
-    // Empezar grabación y audio al mismo tiempo
     recorder.start(100);
-    const startAudioTime = audioCtx.currentTime;
-    audioBuf.start(0);
+
+    // Asegurar AudioContext activo justo antes de start()
+    audioCtx.resume().then(() => { audioBuf.start(0); });
+
+    const startTs = performance.now();    // reloj fiable, independiente de AudioContext
+    const imgSlot = duration / images.length;
+    let lastSec = -1;
     onProgress("Grabando...");
 
-    const imgSlot = duration / images.length;
-    let lastProgressSec = -1;
-
-    // setInterval es más fiable que rAF (no se pausa en tabs en segundo plano)
+    // setInterval no se pausa cuando el tab está en segundo plano
     const intervalId = setInterval(() => {
       try {
-        const elapsed = audioCtx.currentTime - startAudioTime;
+        const elapsed = (performance.now() - startTs) / 1000;
 
-        // Parar cuando termine el audio
-        if (elapsed >= duration + 0.3) {
+        if (elapsed >= duration + 0.5) {
           clearInterval(intervalId);
           recorder.stop();
           return;
@@ -226,7 +227,7 @@ async function renderShort(
 
         // ── Imagen actual con efecto Ken Burns ──────────────────────────────
         const imgIdx  = Math.min(Math.floor(elapsed / imgSlot), images.length - 1);
-        const imgProg = (elapsed % imgSlot) / imgSlot; // 0–1 dentro del slot
+        const imgProg = imgSlot > 0 ? (elapsed % imgSlot) / imgSlot : 0;
         const img     = images[imgIdx];
 
         const zoom  = 1 + imgProg * 0.15;
@@ -236,7 +237,7 @@ async function renderShort(
         const dh    = img.naturalHeight * ratio;
         ctx.drawImage(img, (W - dw) / 2 + panX, (H - dh) / 2, dw, dh);
 
-        // ── Fade suave hacia la siguiente imagen (último 20% del slot) ──────
+        // ── Fade hacia la siguiente imagen (último 20% del slot) ─────────────
         if (imgProg > 0.8 && imgIdx + 1 < images.length) {
           const alpha = (imgProg - 0.8) / 0.2;
           const next  = images[imgIdx + 1];
@@ -247,33 +248,32 @@ async function renderShort(
             (W - next.naturalWidth * nr) / 2,
             (H - next.naturalHeight * nr) / 2,
             next.naturalWidth * nr,
-            next.naturalHeight * nr
+            next.naturalHeight * nr,
           );
           ctx.globalAlpha = 1;
         }
 
-        // ── Gradiente oscuro en la mitad inferior ────────────────────────────
+        // ── Gradiente oscuro inferior ─────────────────────────────────────────
         const grad = ctx.createLinearGradient(0, H * 0.5, 0, H);
         grad.addColorStop(0, "rgba(0,0,0,0)");
         grad.addColorStop(1, "rgba(0,0,0,0.7)");
         ctx.fillStyle = grad;
         ctx.fillRect(0, H * 0.5, W, H * 0.5);
 
-        // ── Subtítulo sincronizado ───────────────────────────────────────────
+        // ── Subtítulo sincronizado ─────────────────────────────────────────────
         const sub = subtitles.find(s => elapsed >= s.start && elapsed < s.end);
         if (sub) drawSub(ctx, sub.text, W, H);
 
-        // ── Actualizar progreso cada segundo ────────────────────────────────
+        // ── Progreso cada segundo ──────────────────────────────────────────────
         const nowSec = Math.floor(elapsed);
-        if (nowSec !== lastProgressSec) {
-          lastProgressSec = nowSec;
+        if (nowSec !== lastSec) {
+          lastSec = nowSec;
           onProgress(`Grabando... ${nowSec}s / ${Math.round(duration)}s`);
         }
       } catch (frameErr) {
         console.error("Error en frame:", frameErr);
-        // Continuar — no matar el loop por un frame fallido
       }
-    }, Math.round(1000 / 30)); // 30 fps
+    }, 33); // ~30 fps
   });
 }
 
@@ -510,7 +510,7 @@ export default function CrearShortPage() {
               </button>
             </div>
             <div className="relative rounded-xl overflow-hidden mx-auto" style={{ maxWidth: 320, background: "#000" }}>
-              <video ref={videoRef} src={videoUrl} className="w-full" playsInline onEnded={() => setPlaying(false)} />
+              <video ref={videoRef} src={videoUrl} className="w-full" playsInline loop onEnded={() => setPlaying(false)} />
               <button onClick={togglePlay} className="absolute inset-0 flex items-center justify-center"
                 style={{ background: playing ? "transparent" : "rgba(0,0,0,0.4)" }}>
                 {!playing && (
