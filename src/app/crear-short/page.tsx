@@ -129,16 +129,19 @@ async function renderShort(
 
   // ── 1. Crear elementos <img> desde data URLs (instant, sin red, sin CORS) ─
   onProgress("Preparando imágenes...");
-  const images = await Promise.all(
+  const imgResults = await Promise.allSettled(
     photoDataUrls.map(dataUrl =>
       new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error("Error decodificando imagen"));
-        img.src = dataUrl;  // data URL: mismo origen, nunca tacha el canvas
+        img.src = dataUrl;  // data URL = mismo origen, nunca tacha el canvas
       })
     )
   );
+  const images = imgResults
+    .filter((r): r is PromiseFulfilledResult<HTMLImageElement> => r.status === "fulfilled")
+    .map(r => r.value);
   if (images.length === 0) throw new Error("No se pudieron preparar imágenes de fondo");
   onProgress(`${images.length} imágenes listas`);
 
