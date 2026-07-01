@@ -120,29 +120,42 @@ function drawSub(ctx: CanvasRenderingContext2D, text: string, W: number, H: numb
 // ─── Renderer ─────────────────────────────────────────────────────────────────
 
 async function renderShort(
-  photoDataUrls: string[],   // base64 data URLs ya descargadas por el servidor
+  tema: string,              // tema del video — usado para seeds de Picsum
   audioBlob: Blob,
   cleanScript: string,
   onProgress: (msg: string) => void,
 ): Promise<string> {
   if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
 
-  // ── 1. Crear elementos <img> desde data URLs (instant, sin red, sin CORS) ─
-  onProgress("Preparando imágenes...");
+  // ── 1. Cargar imágenes desde Picsum Photos ────────────────────────────────
+  //    picsum.photos = fotos reales de Unsplash, CORS habilitado, gratis, sin auth
+  //    El seed determina qué foto sale — seeds distintos = fotos distintas
+  onProgress("Cargando imágenes...");
+
+  // Generar 5 seeds distintos basados en palabras del tema
+  const baseWords = tema.toLowerCase()
+    .normalize("NFD").replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/).filter(w => w.length > 2);
+  const seeds = Array.from({ length: 5 }, (_, i) => `${baseWords[i % baseWords.length] || "video"}-${i}`);
+
   const imgResults = await Promise.allSettled(
-    photoDataUrls.map(dataUrl =>
-      new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error("Error decodificando imagen"));
-        img.src = dataUrl;  // data URL = mismo origen, nunca tacha el canvas
-      })
-    )
+    seeds.map((seed, i) => new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";   // Picsum tiene Access-Control-Allow-Origin: *
+      const t = setTimeout(() => reject(new Error(`Timeout imagen ${i + 1}`)), 15000);
+      img.onload  = () => { clearTimeout(t); resolve(img); };
+      img.onerror = () => { clearTimeout(t); reject(new Error(`Error img ${i + 1}`)); };
+      // 608×1080 = exactamente el tamaño del canvas — sin redimensionar
+      img.src = `https://picsum.photos/seed/${encodeURIComponent(seed)}/608/1080`;
+    }))
   );
+
   const images = imgResults
     .filter((r): r is PromiseFulfilledResult<HTMLImageElement> => r.status === "fulfilled")
     .map(r => r.value);
-  if (images.length === 0) throw new Error("No se pudieron preparar imágenes de fondo");
+
+  if (images.length === 0) throw new Error("No se pudieron cargar las imágenes de fondo. Verifica tu conexión.");
   onProgress(`${images.length} imágenes listas`);
 
   // ── 2. Decodificar audio ───────────────────────────────────────────────────
@@ -324,22 +337,10 @@ export default function CrearShortPage() {
       }
       setStep("script", "done", `${scriptText.length} caracteres`);
 
-      // ── 2. Imágenes vía /api/pexels-batch ────────────────────────────────────
-      //    Claude genera keywords en inglés → Pexels busca 1 foto por keyword →
-      //    servidor descarga y devuelve base64 → sin CORS, sin proxy, siempre funciona
-      setStep("videos", "loading", "Buscando imágenes variadas...");
-      const batchRes = await fetch("/api/pexels-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tema: tema || scriptText.slice(0, 80) }),
-      });
-      if (!batchRes.ok) throw new Error("Error obteniendo imágenes de fondo");
-      const { images: photoDataUrls, keywords: usedKeywords } = await batchRes.json() as {
-        images: string[];
-        keywords: string[];
-      };
-      if (!photoDataUrls?.length) throw new Error("No se pudieron obtener imágenes");
-      setStep("videos", "done", `${photoDataUrls.length} imágenes: ${(usedKeywords || []).slice(0, 3).join(", ")}`);
+      // ── 2. Imágenes de fondo — Picsum Photos ──────────────────────────────────
+      //    Fotos reales de Unsplash, CORS habilitado, sin API key, sin servidor.
+      //    Se cargan directamente en el cliente durante el render.
+      setStep("videos", "done", "Imágenes de fondo listas (Picsum)");
 
       // ── 3. TTS (sin marcadores) ───────────────────────────────────────────
       setStep("audio", "loading");
@@ -357,7 +358,7 @@ export default function CrearShortPage() {
       // ── 4. Render ─────────────────────────────────────────────────────────
       setStep("render", "loading", "Iniciando...");
       const url = await renderShort(
-        photoDataUrls,
+        tema || scriptText.slice(0, 40),
         audioBlob,
         scriptText,
         msg => setStep("render", "loading", msg),
@@ -401,7 +402,7 @@ export default function CrearShortPage() {
             <h1 className="text-3xl font-bold text-white">Crear Short con IA</h1>
           </div>
           <p className="text-slate-400 text-sm">
-            Guión → Voz → Video Pexels + Subtítulos → Listo para TikTok / Reels / Shorts
+            Guión → Voz → Fondo animado + Subtítulos → Listo para TikTok / Reels / Shorts
           </p>
         </div>
 
