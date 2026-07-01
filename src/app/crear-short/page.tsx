@@ -127,36 +127,42 @@ async function renderShort(
 ): Promise<string> {
   if (!("MediaRecorder" in window)) throw new Error("Tu navegador no soporta grabación de video.");
 
-  // ── 1. Cargar imágenes desde Picsum Photos ────────────────────────────────
-  //    picsum.photos = fotos reales de Unsplash, CORS habilitado, gratis, sin auth
-  //    El seed determina qué foto sale — seeds distintos = fotos distintas
-  onProgress("Cargando imágenes...");
+  // ── 1. Cargar imágenes: Picsum via proxy → blob URL ──────────────────────
+  //    Picsum = fotos reales de Unsplash, gratis, sin API key
+  //    Proxy → blob URL = mismo origen garantizado → canvas NUNCA tainted
+  onProgress("Cargando imágenes (1/5)...");
 
-  // Generar 5 seeds distintos basados en palabras del tema
   const baseWords = tema.toLowerCase()
     .normalize("NFD").replace(/\p{Diacritic}/gu, "")
     .replace(/[^a-z0-9\s]/g, "")
     .split(/\s+/).filter(w => w.length > 2);
-  const seeds = Array.from({ length: 5 }, (_, i) => `${baseWords[i % baseWords.length] || "video"}-${i}`);
+  const seeds = Array.from({ length: 5 }, (_, i) => `${baseWords[i % baseWords.length] || "visual"}-${i}`);
 
-  const imgResults = await Promise.allSettled(
-    seeds.map((seed, i) => new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";   // Picsum tiene Access-Control-Allow-Origin: *
-      const t = setTimeout(() => reject(new Error(`Timeout imagen ${i + 1}`)), 15000);
-      img.onload  = () => { clearTimeout(t); resolve(img); };
-      img.onerror = () => { clearTimeout(t); reject(new Error(`Error img ${i + 1}`)); };
-      // 608×1080 = exactamente el tamaño del canvas — sin redimensionar
-      img.src = `https://picsum.photos/seed/${encodeURIComponent(seed)}/608/1080`;
-    }))
-  );
+  const images: HTMLImageElement[] = [];
+  for (let i = 0; i < seeds.length; i++) {
+    try {
+      const picsumUrl = `https://picsum.photos/seed/${encodeURIComponent(seeds[i])}/608/1080`;
+      const res = await fetch(`/api/download-image?url=${encodeURIComponent(picsumUrl)}&filename=bg${i}.jpg`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      if (blob.size < 1000) throw new Error(`Imagen vacía`);
+      const blobUrl = URL.createObjectURL(blob);
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        const t = setTimeout(() => reject(new Error("timeout")), 8000);
+        el.onload  = () => { clearTimeout(t); resolve(el); };
+        el.onerror = () => { clearTimeout(t); reject(new Error("decode")); };
+        el.src = blobUrl;
+      });
+      images.push(img);
+      onProgress(`Cargando imágenes (${images.length}/5)...`);
+    } catch (e) {
+      console.warn(`Imagen ${i + 1} omitida:`, e);
+    }
+  }
 
-  const images = imgResults
-    .filter((r): r is PromiseFulfilledResult<HTMLImageElement> => r.status === "fulfilled")
-    .map(r => r.value);
-
-  if (images.length === 0) throw new Error("No se pudieron cargar las imágenes de fondo. Verifica tu conexión.");
-  onProgress(`${images.length} imágenes listas`);
+  if (images.length === 0) throw new Error("No se pudieron cargar imágenes. Revisa tu conexión a internet.");
+  onProgress(`${images.length} de 5 imágenes listas`);
 
   // ── 2. Decodificar audio ───────────────────────────────────────────────────
   const audioCtx = new AudioContext();
